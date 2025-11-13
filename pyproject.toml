@@ -1,10 +1,38 @@
 [project]
 name = "sj-sync"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time position synchronization for Shioaji"
 readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.10"
+authors = [
+    { name = "yvictor", email = "yvictor3141@gmail.com" }
+]
+license = { text = "MIT" }
+keywords = ["shioaji", "trading", "position", "real-time", "taiwan", "stock"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "shioaji>=1.2.0",
+    "pydantic>=2.0.0",
+    "loguru>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yvictor/sj_sync"
+Repository = "https://github.com/yvictor/sj_sync"
+Issues = "https://github.com/yvictor/sj_sync/issues"
 
 [project.scripts]
 sj-sync = "sj_sync:main"
@@ -12,3 +40,12 @@ sj-sync = "sj_sync:main"
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.4",
+    "zuban>=0.2.2",
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+    "ipykernel>=7.1.0",
+]
