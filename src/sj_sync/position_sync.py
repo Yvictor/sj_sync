@@ -85,6 +85,7 @@ class PositionSync:
                             direction=pnl.direction,
                             quantity=pnl.quantity,
                             yd_quantity=pnl.yd_quantity,
+                            yd_offset_quantity=0,  # Today starts with 0 offset
                             cond=pnl.cond,
                         )
                         if account_key not in self._stock_positions:
@@ -203,6 +204,58 @@ class PositionSync:
                 account, code, action, quantity, price, order_cond
             )
 
+    def _is_day_trading_offset(
+        self, code: str, account_key: str, action: Action, order_cond: StockOrderCond
+    ) -> tuple[bool, StockOrderCond | None]:
+        """Check if this is a day trading offset transaction.
+
+        Day trading rules:
+        - MarginTrading Buy + ShortSelling Sell = offset MarginTrading today's quantity
+        - ShortSelling Sell + MarginTrading Buy = offset ShortSelling today's quantity
+        - Cash Buy + Cash Sell = offset Cash today's quantity
+        - Cash Sell (short) + Cash Buy = offset Cash today's quantity
+
+        Returns:
+            (is_day_trading, opposite_cond)
+        """
+        # MarginTrading + ShortSelling day trading
+        if order_cond == StockOrderCond.ShortSelling and action == Action.Sell:
+            # Check if there's today's MarginTrading position
+            margin_key = (code, StockOrderCond.MarginTrading)
+            if margin_key in self._stock_positions.get(account_key, {}):
+                margin_pos = self._stock_positions[account_key][margin_key]
+                # Today's quantity = quantity - (yd_quantity - yd_offset_quantity)
+                yd_remaining = margin_pos.yd_quantity - margin_pos.yd_offset_quantity
+                today_qty = margin_pos.quantity - yd_remaining
+                if today_qty > 0:
+                    return True, StockOrderCond.MarginTrading
+
+        if order_cond == StockOrderCond.MarginTrading and action == Action.Buy:
+            # Check if there's today's ShortSelling position
+            short_key = (code, StockOrderCond.ShortSelling)
+            if short_key in self._stock_positions.get(account_key, {}):
+                short_pos = self._stock_positions[account_key][short_key]
+                # Today's quantity = quantity - (yd_quantity - yd_offset_quantity)
+                yd_remaining = short_pos.yd_quantity - short_pos.yd_offset_quantity
+                today_qty = short_pos.quantity - yd_remaining
+                if today_qty > 0:
+                    return True, StockOrderCond.ShortSelling
+
+        # Cash day trading
+        if order_cond == StockOrderCond.Cash:
+            cash_key = (code, StockOrderCond.Cash)
+            if cash_key in self._stock_positions.get(account_key, {}):
+                cash_pos = self._stock_positions[account_key][cash_key]
+                # Buy then Sell or Sell then Buy
+                if cash_pos.direction != action:
+                    # Today's quantity = quantity - (yd_quantity - yd_offset_quantity)
+                    yd_remaining = cash_pos.yd_quantity - cash_pos.yd_offset_quantity
+                    today_qty = cash_pos.quantity - yd_remaining
+                    if today_qty > 0:
+                        return True, StockOrderCond.Cash
+
+        return False, None
+
     def _update_stock_position(
         self,
         account: Union[Account, AccountDict],
@@ -228,16 +281,156 @@ class PositionSync:
         if account_key not in self._stock_positions:
             self._stock_positions[account_key] = {}
 
+        # Check for day trading offset
+        is_day_trading, opposite_cond = self._is_day_trading_offset(
+            code, account_key, action, order_cond
+        )
+
+        if is_day_trading and opposite_cond:
+            # Day trading: offset today's position in opposite condition
+            self._process_day_trading_offset(
+                account_key, code, quantity, price, order_cond, opposite_cond, action
+            )
+        else:
+            # Normal trading or same-cond offset
+            self._process_normal_trading(
+                account_key, code, action, quantity, price, order_cond
+            )
+
+    def _process_day_trading_offset(
+        self,
+        account_key: str,
+        code: str,
+        quantity: int,
+        price: float,
+        order_cond: StockOrderCond,
+        opposite_cond: StockOrderCond,
+        action: Action,
+    ) -> None:
+        """Process day trading offset transaction.
+
+        Day trading offsets today's quantity only.
+        Note: yd_quantity and yd_offset_quantity are NOT modified in day trading.
+        """
+        opposite_key = (code, opposite_cond)
+        opposite_pos = self._stock_positions[account_key][opposite_key]
+
+        # Calculate today's quantity: quantity - (yd_quantity - yd_offset_quantity)
+        yd_remaining = opposite_pos.yd_quantity - opposite_pos.yd_offset_quantity
+        today_qty = opposite_pos.quantity - yd_remaining
+        offset_qty = min(quantity, today_qty)
+        remaining_qty = quantity - offset_qty
+
+        # Offset today's position (only reduce quantity, yd_quantity & yd_offset_quantity stay unchanged)
+        opposite_pos.quantity -= offset_qty
+        logger.info(
+            f"{code} DAY-TRADE OFFSET {action} {price} x {offset_qty} "
+            f"[{order_cond}] offsets [{opposite_cond}] -> {opposite_pos}"
+        )
+
+        # Remove if zero
+        if opposite_pos.quantity == 0:
+            del self._stock_positions[account_key][opposite_key]
+            logger.info(f"{code} [{opposite_cond}] REMOVED (day trading closed)")
+
+        # If there's remaining quantity after offsetting today's, it offsets yesterday's position
+        if remaining_qty > 0 and opposite_key in self._stock_positions[account_key]:
+            # Calculate how much yesterday's position is left
+            opposite_pos = self._stock_positions[account_key][opposite_key]
+            yd_available = opposite_pos.yd_quantity - opposite_pos.yd_offset_quantity
+            yd_offset = min(remaining_qty, yd_available)
+
+            if yd_offset > 0:
+                # Reduce quantity and increase yd_offset_quantity (yd_quantity never changes)
+                opposite_pos.quantity -= yd_offset
+                opposite_pos.yd_offset_quantity += yd_offset
+                remaining_qty -= yd_offset
+                logger.info(
+                    f"{code} OFFSET YD {action} {price} x {yd_offset} "
+                    f"[{order_cond}] offsets [{opposite_cond}] yd -> {opposite_pos}"
+                )
+
+                if opposite_pos.quantity == 0:
+                    del self._stock_positions[account_key][opposite_key]
+                    logger.info(f"{code} [{opposite_cond}] REMOVED (fully closed)")
+
+        # If still remaining, create new position
+        if remaining_qty > 0:
+            self._create_or_update_position(
+                account_key, code, action, remaining_qty, price, order_cond
+            )
+
+    def _process_normal_trading(
+        self,
+        account_key: str,
+        code: str,
+        action: Action,
+        quantity: int,
+        price: float,
+        order_cond: StockOrderCond,
+    ) -> None:
+        """Process normal trading (non-day-trading).
+
+        For margin/short trading with opposite direction:
+        - Can only offset yesterday's position
+        - Increase yd_offset_quantity, decrease quantity
+        - yd_quantity never changes
+        """
         key = (code, order_cond)
         position = self._stock_positions[account_key].get(key)
 
         if position is None:
             # Create new position
+            self._create_or_update_position(
+                account_key, code, action, quantity, price, order_cond
+            )
+        else:
+            # Existing position
+            if position.direction == action:
+                # Same direction: add to position
+                position.quantity += quantity
+                logger.info(
+                    f"{code} ADD {action} {price} x {quantity} [{order_cond}] -> {position}"
+                )
+            else:
+                # Opposite direction: can only offset yesterday's position
+                # Calculate yesterday's remaining
+                yd_available = position.yd_quantity - position.yd_offset_quantity
+                offset_qty = min(quantity, yd_available)
+
+                if offset_qty > 0:
+                    # Reduce quantity and increase yd_offset_quantity (yd_quantity never changes)
+                    position.quantity -= offset_qty
+                    position.yd_offset_quantity += offset_qty
+                    logger.info(
+                        f"{code} OFFSET YD {action} {price} x {offset_qty} [{order_cond}] -> {position}"
+                    )
+
+                    # Remove if zero
+                    if position.quantity == 0:
+                        del self._stock_positions[account_key][key]
+                        logger.info(f"{code} CLOSED [{order_cond}] -> REMOVED")
+
+    def _create_or_update_position(
+        self,
+        account_key: str,
+        code: str,
+        action: Action,
+        quantity: int,
+        price: float,
+        order_cond: StockOrderCond,
+    ) -> None:
+        """Create new position or add to existing."""
+        key = (code, order_cond)
+        position = self._stock_positions[account_key].get(key)
+
+        if position is None:
             position = StockPosition(
                 code=code,
                 direction=action,
                 quantity=quantity,
                 yd_quantity=0,
+                yd_offset_quantity=0,  # New position today has no offset
                 cond=order_cond,
             )
             self._stock_positions[account_key][key] = position
@@ -245,30 +438,10 @@ class PositionSync:
                 f"{code} NEW {action} {price} x {quantity} [{order_cond}] -> {position}"
             )
         else:
-            # Update existing position
-            if position.direction == action:
-                position.quantity += quantity
-            else:
-                position.quantity -= quantity
-
-            # Update cond if changed (e.g., day trading settlement)
-            if position.cond != order_cond:
-                # Remove old key and add with new key
-                del self._stock_positions[account_key][key]
-                position.cond = order_cond
-                new_key = (code, order_cond)
-                self._stock_positions[account_key][new_key] = position
-
-            # Remove if quantity becomes zero
-            if position.quantity == 0:
-                del self._stock_positions[account_key][key]
-                logger.info(
-                    f"{code} CLOSED {action} {price} x {quantity} [{order_cond}] -> REMOVED"
-                )
-            else:
-                logger.info(
-                    f"{code} {action} {price} x {quantity} [{order_cond}] -> {position}"
-                )
+            position.quantity += quantity
+            logger.info(
+                f"{code} ADD {action} {price} x {quantity} [{order_cond}] -> {position}"
+            )
 
     def _update_futures_position(
         self,

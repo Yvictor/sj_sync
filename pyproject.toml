@@ -47,5 +47,6 @@ dev = [
     "zuban>=0.2.2",
     "pytest>=8.0.0",
     "pytest-mock>=3.12.0",
+    "pytest-bdd>=7.0.0",
     "ipykernel>=7.1.0",
 ]
