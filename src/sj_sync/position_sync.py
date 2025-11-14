@@ -335,26 +335,12 @@ class PositionSync:
             del self._stock_positions[account_key][opposite_key]
             logger.info(f"{code} [{opposite_cond}] REMOVED (day trading closed)")
 
-        # If there's remaining quantity after offsetting today's, it offsets yesterday's position
-        if remaining_qty > 0 and opposite_key in self._stock_positions[account_key]:
-            # Calculate how much yesterday's position is left
-            opposite_pos = self._stock_positions[account_key][opposite_key]
-            yd_available = opposite_pos.yd_quantity - opposite_pos.yd_offset_quantity
-            yd_offset = min(remaining_qty, yd_available)
-
-            if yd_offset > 0:
-                # Reduce quantity and increase yd_offset_quantity (yd_quantity never changes)
-                opposite_pos.quantity -= yd_offset
-                opposite_pos.yd_offset_quantity += yd_offset
-                remaining_qty -= yd_offset
-                logger.info(
-                    f"{code} OFFSET YD {action} {price} x {yd_offset} "
-                    f"[{order_cond}] offsets [{opposite_cond}] yd -> {opposite_pos}"
-                )
-
-                if opposite_pos.quantity == 0:
-                    del self._stock_positions[account_key][opposite_key]
-                    logger.info(f"{code} [{opposite_cond}] REMOVED (fully closed)")
+        # IMPORTANT: Day trading can ONLY offset today's position, NOT yesterday's position
+        # Yesterday's positions can only be closed by same-condition opposite trades:
+        # - MarginTrading Buy can only be closed by MarginTrading Sell (資買 → 資賣)
+        # - ShortSelling Sell can only be closed by ShortSelling Buy (券賣 → 券買)
+        # Therefore, if there's remaining quantity after day trading offset,
+        # it should create a NEW position, not offset yesterday's position.
 
         # If still remaining, create new position
         if remaining_qty > 0:
