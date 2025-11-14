@@ -8,7 +8,9 @@ from shioaji.position import StockPosition as SjStockPosition
 from shioaji.position import FuturePosition as SjFuturePosition
 
 
-def create_mock_account(broker_id="9100", account_id="1234567", account_type=AccountType.Stock):
+def create_mock_account(
+    broker_id="9100", account_id="1234567", account_type=AccountType.Stock
+):
     """Helper to create mock account with required attributes."""
     account = Mock()
     account.broker_id = broker_id

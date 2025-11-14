@@ -33,9 +33,15 @@ class StockPosition(BaseModel):
     code: str = Field(..., description="Stock code/symbol")
     direction: Action = Field(..., description="Buy or Sell")
     quantity: int = Field(default=0, description="Current position quantity")
-    yd_quantity: int = Field(default=0, description="Yesterday's position quantity (fixed)")
-    yd_offset_quantity: int = Field(default=0, description="Yesterday's offset quantity (today)")
-    cond: StockOrderCond = Field(default=StockOrderCond.Cash, description="Order condition")
+    yd_quantity: int = Field(
+        default=0, description="Yesterday's position quantity (fixed)"
+    )
+    yd_offset_quantity: int = Field(
+        default=0, description="Yesterday's offset quantity (today)"
+    )
+    cond: StockOrderCond = Field(
+        default=StockOrderCond.Cash, description="Order condition"
+    )
 
 
 class FuturesPosition(BaseModel):

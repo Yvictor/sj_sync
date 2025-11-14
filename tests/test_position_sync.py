@@ -170,7 +170,9 @@ class TestStockDealEvents:
         assert positions[0].direction == Action.Buy
         assert positions[0].quantity == 2
 
-    def test_add_to_existing_position_same_direction(self, mock_api, sample_stock_pnl, sample_stock_deal):
+    def test_add_to_existing_position_same_direction(
+        self, mock_api, sample_stock_pnl, sample_stock_deal
+    ):
         """Test adding to existing position (same direction)."""
         from tests.conftest import create_mock_account
         from shioaji.account import AccountType
@@ -195,7 +197,9 @@ class TestStockDealEvents:
         assert len(positions) == 1
         assert positions[0].quantity == 12  # 10 + 2
 
-    def test_reduce_position_opposite_direction(self, mock_api, sample_stock_pnl, sample_sell_deal):
+    def test_reduce_position_opposite_direction(
+        self, mock_api, sample_stock_pnl, sample_sell_deal
+    ):
         """Test reducing position (opposite direction)."""
         from tests.conftest import create_mock_account
         from shioaji.account import AccountType
@@ -374,8 +378,16 @@ class TestMarginAndShortSelling:
         positions = sync.list_positions()
         assert len(positions) == 2  # Should be two separate positions
 
-        cash_pos = [p for p in positions if isinstance(p, StockPosition) and p.cond == StockOrderCond.Cash][0]
-        margin_pos = [p for p in positions if isinstance(p, StockPosition) and p.cond == StockOrderCond.MarginTrading][0]
+        cash_pos = [
+            p
+            for p in positions
+            if isinstance(p, StockPosition) and p.cond == StockOrderCond.Cash
+        ][0]
+        margin_pos = [
+            p
+            for p in positions
+            if isinstance(p, StockPosition) and p.cond == StockOrderCond.MarginTrading
+        ][0]
 
         assert cash_pos.quantity == 10
         assert margin_pos.quantity == 5

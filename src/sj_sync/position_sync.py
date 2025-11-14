@@ -70,9 +70,7 @@ class PositionSync:
                     account=account, unit=Unit.Common
                 )
             except Exception as e:
-                logger.warning(
-                    f"Failed to load positions for account {account}: {e}"
-                )
+                logger.warning(f"Failed to load positions for account {account}: {e}")
                 continue
 
             # Determine if this is stock or futures account based on account_type
@@ -139,7 +137,9 @@ class PositionSync:
             ):
                 futopt_account_key = self._get_account_key(self.api.futopt_account)
                 if futopt_account_key in self._futures_positions:
-                    futures_list: List[FuturesPosition] = list(self._futures_positions[futopt_account_key].values())
+                    futures_list: List[FuturesPosition] = list(
+                        self._futures_positions[futopt_account_key].values()
+                    )
                     return futures_list
 
             # No positions at all
@@ -155,7 +155,9 @@ class PositionSync:
                 return []
             elif account_type == AccountType.Future:
                 if account_key in self._futures_positions:
-                    futures_list: List[FuturesPosition] = list(self._futures_positions[account_key].values())
+                    futures_list: List[FuturesPosition] = list(
+                        self._futures_positions[account_key].values()
+                    )
                     return futures_list
                 return []
 
