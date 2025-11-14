@@ -1,5 +1,11 @@
 # sj_sync
 
+[![CI](https://github.com/yvictor/sj_sync/actions/workflows/ci.yml/badge.svg)](https://github.com/yvictor/sj_sync/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/yvictor/sj_sync/branch/master/graph/badge.svg)](https://codecov.io/gh/yvictor/sj_sync)
+[![PyPI version](https://badge.fury.io/py/sj-sync.svg)](https://badge.fury.io/py/sj-sync)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Real-time position synchronization for Shioaji.
 
 ## Overview
@@ -149,25 +155,41 @@ uv sync
 ### Run Tests
 
 ```bash
+# All tests
 uv run pytest tests/ -v
+
+# With coverage
+uv run pytest --cov=sj_sync --cov-report=html
 ```
 
-### Type Checking
+### Code Quality
 
 ```bash
+# Linting
+uv run ruff check src/ tests/
+
+# Formatting
+uv run ruff format src/ tests/
+
+# Type checking
 uv run zuban check src/
 ```
 
-### Linting
+### CI/CD
 
-```bash
-uv run ruff check src/ tests/
-```
+Every push and pull request triggers automated:
+- ✅ Code quality checks (ruff, zuban)
+- ✅ All 32 tests (unit + BDD)
+- ✅ Coverage report to Codecov
+- ✅ Build verification
+
+See [CI Setup Guide](.github/CI_SETUP.md) for details.
 
 ## Testing
 
 The project includes comprehensive pytest tests covering:
 
+**Unit Tests (18 tests):**
 - ✅ Position initialization from `list_positions()`
 - ✅ Buy/sell deal events
 - ✅ Day trading scenarios
@@ -176,9 +198,25 @@ The project includes comprehensive pytest tests covering:
 - ✅ Multi-account support
 - ✅ Edge cases and error handling
 
+**BDD Tests (14 scenarios in Chinese):**
+- ✅ 當沖交易 (Day trading offset rules)
+- ✅ 融資融券 (Margin/short trading with yesterday's positions)
+- ✅ 混合場景 (Complex mixed trading scenarios)
+- ✅ Correct handling of `yd_quantity` and `yd_offset_quantity`
+
 Run tests with:
 ```bash
-uv run pytest tests/ -v --cov=src/sj_sync
+# All tests (32 total)
+uv run pytest tests/ -v
+
+# With coverage report
+uv run pytest --cov=sj_sync --cov-report=html --cov-report=term-missing
+```
+
+View coverage report:
+```bash
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
 ```
 
 ## License
