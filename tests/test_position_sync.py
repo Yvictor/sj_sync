@@ -140,12 +140,12 @@ class TestPositionSyncInitialization:
         assert len(all_positions) == 1
 
         # Filter by account1
-        acc1_positions = sync.list_positions(account=account1)
+        acc1_positions = sync.list_positions(account=account1)  # type: ignore[arg-type]
         assert len(acc1_positions) == 1
         assert acc1_positions[0].code == "2330"
 
         # Filter by account2
-        acc2_positions = sync.list_positions(account=account2)
+        acc2_positions = sync.list_positions(account=account2)  # type: ignore[arg-type]
         assert len(acc2_positions) == 1
         assert acc2_positions[0].code == "2317"
 
@@ -482,12 +482,12 @@ class TestMultipleAccounts:
         assert default_positions[0].quantity == 10
 
         # Filter by account1
-        acc1_pos = sync.list_positions(account=account1)
+        acc1_pos = sync.list_positions(account=account1)  # type: ignore[arg-type]
         assert len(acc1_pos) == 1
         assert acc1_pos[0].quantity == 10
 
         # Filter by account2
-        acc2_pos = sync.list_positions(account=account2)
+        acc2_pos = sync.list_positions(account=account2)  # type: ignore[arg-type]
         assert len(acc2_pos) == 1
         assert acc2_pos[0].quantity == 5
 

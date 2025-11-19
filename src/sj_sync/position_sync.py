@@ -3,7 +3,7 @@
 from loguru import logger
 from typing import Dict, List, Optional, Union, Tuple
 import shioaji as sj
-from shioaji.constant import OrderState, Action, StockOrderCond, Unit
+from shioaji.constant import OrderState, Action, StockOrderCond, Unit, Status
 from shioaji.account import Account, AccountType
 from shioaji.position import StockPosition as SjStockPostion
 from shioaji.position import FuturePosition as SjFuturePostion
@@ -76,14 +76,26 @@ class PositionSync:
             # Determine if this is stock or futures account based on account_type
             account_type = account.account_type
             if account_type == AccountType.Stock:
+                # Load and sum today's trades for this stock account
+                trades_sum = self._load_and_sum_today_trades(account)
+
                 for pnl in positions_pnl:
                     if isinstance(pnl, SjStockPostion):
+                        # Calculate yd_offset_quantity
+                        yd_offset = self._calculate_yd_offset_for_position(
+                            code=pnl.code,
+                            cond=pnl.cond,
+                            direction=pnl.direction,
+                            yd_quantity=pnl.yd_quantity,
+                            trades_sum=trades_sum,
+                        )
+
                         position = StockPosition(
                             code=pnl.code,
                             direction=pnl.direction,
                             quantity=pnl.quantity,
                             yd_quantity=pnl.yd_quantity,
-                            yd_offset_quantity=0,  # Today starts with 0 offset
+                            yd_offset_quantity=yd_offset,
                             cond=pnl.cond,
                         )
                         if account_key not in self._stock_positions:
@@ -104,6 +116,95 @@ class PositionSync:
                         self._futures_positions[account_key][position.code] = position
 
             logger.info(f"Initialized positions for account {account_key}")
+
+    def _load_and_sum_today_trades(
+        self, account: Account
+    ) -> Dict[Tuple[str, StockOrderCond, Action], int]:
+        """Load and sum today's trades by (code, cond, action).
+
+        Args:
+            account: Account to load trades for
+
+        Returns:
+            Dict mapping (code, cond, action) -> total quantity
+        """
+        try:
+            # Update status for this specific account
+            self.api.update_status(account)
+            all_trades = self.api.list_trades()
+
+            # Sum quantities by (code, cond, action)
+            trades_sum: Dict[Tuple[str, StockOrderCond, Action], int] = {}
+
+            for t in all_trades:
+                # Check if trade status is filled
+                if t.status.status not in [Status.Filled, Status.PartFilled]:
+                    continue
+
+                # Check if trade belongs to this account
+                try:
+                    if (
+                        t.order.account.broker_id != account.broker_id
+                        or t.order.account.account_id != account.account_id
+                    ):
+                        continue
+
+                    deal_qty = t.status.deal_quantity
+                    if deal_qty <= 0:
+                        continue
+
+                    # Only process stock orders (which have order_cond)
+                    if not hasattr(t.order, "order_cond"):
+                        continue
+
+                    # Key: (code, cond, action)
+                    key = (t.contract.code, t.order.order_cond, t.order.action)
+                    trades_sum[key] = trades_sum.get(key, 0) + deal_qty
+
+                except AttributeError:
+                    continue
+
+            logger.info(
+                f"Loaded and summed {len(trades_sum)} trade groups "
+                f"for account {account.broker_id}{account.account_id}"
+            )
+            return trades_sum
+        except Exception as e:
+            logger.warning(f"Failed to load trades for yd_offset calculation: {e}")
+            return {}
+
+    def _calculate_yd_offset_for_position(
+        self,
+        code: str,
+        cond: StockOrderCond,
+        direction: Action,
+        yd_quantity: int,
+        trades_sum: Dict[Tuple[str, StockOrderCond, Action], int],
+    ) -> int:
+        """Calculate yd_offset_quantity for a single position.
+
+        Args:
+            code: Stock code
+            cond: Order condition
+            direction: Position direction (Buy/Sell)
+            yd_quantity: Yesterday's quantity
+            trades_sum: Dict mapping (code, cond, action) -> total quantity
+
+        Returns:
+            yd_offset_quantity: Amount of yesterday's position offset today
+        """
+        # If no yesterday position, no offset
+        if yd_quantity == 0:
+            return 0
+
+        # Find opposite direction trades for this (code, cond)
+        opposite_action = Action.Sell if direction == Action.Buy else Action.Buy
+        key = (code, cond, opposite_action)
+
+        # Get total opposite direction quantity (default 0 if no trades)
+        yd_offset = trades_sum.get(key, 0)
+
+        return yd_offset
 
     def list_positions(  # noqa: ARG002
         self, account: Optional[Account] = None, unit: Unit = Unit.Common
