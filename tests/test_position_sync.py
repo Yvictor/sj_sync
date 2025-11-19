@@ -521,3 +521,241 @@ class TestEdgeCases:
         mock_api.set_order_callback.assert_called_once()
         callback = mock_api.set_order_callback.call_args[0][0]
         assert callback == sync.on_order_deal_event
+
+
+class TestSmartSync:
+    """Test smart sync feature with sync_threshold."""
+
+    def test_sync_threshold_disabled_always_use_local(self, mock_api, sample_stock_pnl):
+        """Test sync_threshold=0 always uses local positions."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.stock_account = account
+
+        # sync_threshold=0 (default, disabled)
+        sync = PositionSync(mock_api, sync_threshold=0)
+
+        # Clear the initialization call
+        mock_api.list_positions.reset_mock()
+
+        # list_positions should use local without querying API
+        positions = sync.list_positions()
+
+        # Should not call API again
+        mock_api.list_positions.assert_not_called()
+
+        assert len(positions) == 1
+        assert positions[0].code == "2330"
+
+    def test_sync_threshold_in_unstable_period_use_local(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test using local positions within threshold after deal."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.stock_account = account
+
+        # Enable smart sync with 5 second threshold
+        sync = PositionSync(mock_api, sync_threshold=5)
+
+        # Simulate a deal event
+        deal = {
+            "code": "2330",
+            "action": "Buy",
+            "quantity": 1,
+            "price": 500.0,
+            "order_cond": "Cash",
+            "account": account,
+        }
+        sync.on_order_deal_event(OrderState.StockDeal, deal)
+
+        # Clear the initialization call
+        mock_api.list_positions.reset_mock()
+
+        # Immediately after deal, should use local (within unstable period)
+        positions = sync.list_positions()
+
+        # Should not call API
+        mock_api.list_positions.assert_not_called()
+
+        assert len(positions) == 1
+
+    def test_sync_threshold_in_stable_period_query_api(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test querying API after threshold period."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        import datetime
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.stock_account = account
+
+        # Enable smart sync with 1 second threshold
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Manually set last deal time to 2 seconds ago (beyond threshold)
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Clear the initialization call
+        mock_api.list_positions.reset_mock()
+
+        # After threshold, should query API
+        positions = sync.list_positions()
+
+        # Should call API
+        mock_api.list_positions.assert_called_once()
+
+        assert len(positions) == 1
+
+    def test_sync_threshold_no_previous_deals_query_api(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test querying API when no previous deals recorded."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.stock_account = account
+
+        # Enable smart sync
+        sync = PositionSync(mock_api, sync_threshold=30)
+
+        # Clear the initialization call
+        mock_api.list_positions.reset_mock()
+
+        # No deals yet, should query API (not in unstable period)
+        positions = sync.list_positions()
+
+        # Should call API
+        mock_api.list_positions.assert_called_once()
+
+        assert len(positions) == 1
+
+    def test_background_sync_with_inconsistent_positions(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test background sync detects and updates inconsistent positions."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+
+        # Initialize with one position
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold
+        import datetime
+
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # API returns different quantity (inconsistency)
+        inconsistent_pnl = Mock(spec=SjStockPosition)
+        inconsistent_pnl.code = "2330"
+        inconsistent_pnl.direction = Action.Buy
+        inconsistent_pnl.quantity = 15  # Different from local (11)
+        inconsistent_pnl.yd_quantity = 10
+        inconsistent_pnl.cond = StockOrderCond.Cash
+
+        mock_api.list_positions.return_value = [inconsistent_pnl]
+        mock_api.list_trades.return_value = []  # No trades today
+
+        # Query API - should trigger background sync
+        positions = sync.list_positions()
+
+        # Wait for background thread to complete
+        sync._executor.shutdown(wait=True)
+
+        # Local positions should eventually be updated from API
+        # (Note: In real scenario, this happens asynchronously)
+        assert len(positions) == 1
+        assert positions[0].quantity == 15  # API value returned immediately
+
+    def test_futures_position_direct_update_from_api(
+        self, mock_api, sample_futures_pnl
+    ):
+        """Test futures positions are directly updated from API."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        import datetime
+
+        account = create_mock_account("9100", "FUTOPT", AccountType.Future)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.futopt_account = account
+        mock_api.list_positions.return_value = [sample_futures_pnl]
+
+        # Enable smart sync
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Clear the initialization call
+        mock_api.list_positions.reset_mock()
+
+        # Query should update futures directly from API
+        positions = sync.list_positions(account=account)  # type: ignore[arg-type]
+
+        # Should call API
+        mock_api.list_positions.assert_called_once()
+
+        # Wait for background thread
+        sync._executor.shutdown(wait=True)
+
+        assert len(positions) == 1
+        assert isinstance(positions[0], FuturesPosition)
+
+    def test_api_query_failure_fallback_to_local(self, mock_api, sample_stock_pnl):
+        """Test fallback to local positions when API query fails."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        import datetime
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.stock_account = account
+
+        # Enable smart sync
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Make API query fail
+        mock_api.list_positions.side_effect = Exception("API Error")
+
+        # Should fallback to local positions without crashing
+        positions = sync.list_positions()
+
+        # Should still return local positions
+        assert len(positions) == 1
+        assert positions[0].code == "2330"

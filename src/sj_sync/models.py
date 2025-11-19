@@ -13,19 +13,14 @@ class AccountDict(TypedDict):
 
 
 class StockPosition(BaseModel):
-    """Stock position model compatible with shioaji Position interface.
+    """Stock position model for external API.
 
-    Tracks real-time position with minimal fields:
+    Public-facing position model with essential fields:
     - code: Stock symbol
     - direction: Buy or Sell (Action enum)
     - quantity: Current position quantity (in shares or lots depending on unit)
     - yd_quantity: Yesterday's position quantity (fixed reference, never modified)
-    - yd_offset_quantity: Yesterday's offset quantity (accumulated today)
     - cond: Order condition (StockOrderCond enum)
-
-    Calculations:
-    - Yesterday's actual remaining = yd_quantity - yd_offset_quantity
-    - Today's actual remaining = quantity - (yd_quantity - yd_offset_quantity)
     """
 
     model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
@@ -36,11 +31,26 @@ class StockPosition(BaseModel):
     yd_quantity: int = Field(
         default=0, description="Yesterday's position quantity (fixed)"
     )
-    yd_offset_quantity: int = Field(
-        default=0, description="Yesterday's offset quantity (today)"
-    )
     cond: StockOrderCond = Field(
         default=StockOrderCond.Cash, description="Order condition"
+    )
+
+
+class StockPositionInner(StockPosition):
+    """Internal stock position model with calculation fields.
+
+    Extends StockPosition with internal tracking fields:
+    - yd_offset_quantity: Yesterday's offset quantity (accumulated today)
+
+    This is used internally for position calculations and is never exposed to users.
+
+    Calculations:
+    - Yesterday's actual remaining = yd_quantity - yd_offset_quantity
+    - Today's actual remaining = quantity - (yd_quantity - yd_offset_quantity)
+    """
+
+    yd_offset_quantity: int = Field(
+        default=0, description="Yesterday's offset quantity (today)"
     )
 
 
