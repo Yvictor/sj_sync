@@ -759,3 +759,260 @@ class TestSmartSync:
         # Should still return local positions
         assert len(positions) == 1
         assert positions[0].code == "2330"
+
+    def test_get_default_account_no_accounts(self, mock_api):
+        """Test _get_default_account when no accounts available."""
+        # No stock_account or futopt_account
+        mock_api.list_accounts.return_value = []
+        mock_api.stock_account = None
+        mock_api.futopt_account = None
+
+        sync = PositionSync(mock_api, sync_threshold=0)
+
+        # Should return None when no accounts
+        result = sync._get_default_account()
+        assert result is None
+
+    def test_get_default_account_only_futopt(self, mock_api):
+        """Test _get_default_account when only futopt_account exists."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        futopt_account = create_mock_account("9100", "FUTOPT", AccountType.Future)
+
+        mock_api.list_accounts.return_value = [futopt_account]
+        mock_api.stock_account = None
+        mock_api.futopt_account = futopt_account
+
+        sync = PositionSync(mock_api, sync_threshold=0)
+
+        # Should return futopt_account when no stock_account
+        result = sync._get_default_account()
+        assert result == futopt_account
+
+    def test_initialize_positions_api_error(self, mock_api):
+        """Test _initialize_positions handles API errors gracefully."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        # Make list_positions raise an exception
+        mock_api.list_positions.side_effect = Exception("API Connection Error")
+        mock_api.stock_account = account
+
+        # Should not crash, just log warning and continue
+        sync = PositionSync(mock_api, sync_threshold=0)
+
+        # Positions should be empty since API call failed
+        positions = sync.list_positions()
+        assert len(positions) == 0
+
+    def test_in_unstable_period_no_default_account(self, mock_api):
+        """Test _in_unstable_period when no default account exists."""
+        mock_api.list_accounts.return_value = []
+        mock_api.stock_account = None
+        mock_api.futopt_account = None
+
+        sync = PositionSync(mock_api, sync_threshold=30)
+
+        # Should return False (not in unstable period) when no account
+        result = sync._in_unstable_period(account=None)
+        assert result is False
+
+    def test_query_and_check_positions_no_default_account(self, mock_api):
+        """Test _query_and_check_positions when no default account."""
+        mock_api.list_accounts.return_value = []
+        mock_api.stock_account = None
+        mock_api.futopt_account = None
+
+        sync = PositionSync(mock_api, sync_threshold=30)
+
+        # Should return empty list and log warning
+        positions = sync._query_and_check_positions(account=None)
+        assert positions == []
+
+    def test_background_check_and_sync_exception_handling(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test _background_check_and_sync handles exceptions gracefully."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        import datetime
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Make _compare_and_sync_stock raise an exception by mocking list_trades
+        mock_api.list_trades.side_effect = Exception("Background sync error")
+
+        # Query API - should trigger background sync
+        positions = sync.list_positions()
+
+        # Wait for background thread to complete
+        sync._executor.shutdown(wait=True)
+
+        # Should not crash - exception should be caught and logged
+        assert len(positions) == 1
+
+    def test_handle_inconsistencies_all_types(self, mock_api, sample_stock_pnl):
+        """Test _handle_inconsistencies_stock with all inconsistency types."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+        import datetime
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+
+        # Initialize with one position (2330)
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Create API positions with:
+        # - mismatch: 2330 with different quantity
+        # - missing_local: 2454 not in local
+        # - missing_api: local has 1101 not in API
+        inconsistent_pnl = Mock(spec=SjStockPosition)
+        inconsistent_pnl.code = "2330"
+        inconsistent_pnl.direction = Action.Buy
+        inconsistent_pnl.quantity = 20  # Different from local
+        inconsistent_pnl.yd_quantity = 15
+        inconsistent_pnl.cond = StockOrderCond.Cash
+
+        new_pnl = Mock(spec=SjStockPosition)
+        new_pnl.code = "2454"
+        new_pnl.direction = Action.Buy
+        new_pnl.quantity = 5
+        new_pnl.yd_quantity = 5
+        new_pnl.cond = StockOrderCond.Cash
+
+        # Add a position to local that's not in API
+        from sj_sync.models import StockPositionInner
+
+        sync._stock_positions[account_key][("1101", StockOrderCond.Cash)] = (
+            StockPositionInner(
+                code="1101",
+                direction=Action.Buy,
+                quantity=3,
+                yd_quantity=3,
+                yd_offset_quantity=0,
+                cond=StockOrderCond.Cash,
+            )
+        )
+
+        mock_api.list_positions.return_value = [inconsistent_pnl, new_pnl]
+        mock_api.list_trades.return_value = []
+
+        # Query API - should trigger background sync with all three types
+        positions = sync.list_positions()
+
+        # Wait for background thread to complete
+        sync._executor.shutdown(wait=True)
+
+        # All inconsistencies should be logged and synced
+        assert len(positions) == 2  # API positions returned
+
+    def test_load_and_sum_today_trades_with_non_stock_orders(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test _load_and_sum_today_trades filters non-stock orders."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+
+        # Create mock trades with various edge cases
+        from shioaji.constant import Status
+
+        # Trade 1: Filled stock order (should be included)
+        trade1 = Mock()
+        trade1.status.status = Status.Filled
+        trade1.status.deal_quantity = 5
+        trade1.order.account.broker_id = "9100"
+        trade1.order.account.account_id = "1234567"
+        trade1.order.order_cond = StockOrderCond.Cash
+        trade1.order.action = Action.Buy
+        trade1.contract.code = "2330"
+
+        # Trade 2: Non-filled order (should be skipped)
+        trade2 = Mock()
+        trade2.status.status = Status.Cancelled
+        trade2.status.deal_quantity = 0
+        trade2.order.account.broker_id = "9100"
+        trade2.order.account.account_id = "1234567"
+        trade2.order.order_cond = StockOrderCond.Cash
+        trade2.order.action = Action.Buy
+        trade2.contract.code = "2330"
+
+        # Trade 3: Different account (should be skipped)
+        trade3 = Mock()
+        trade3.status.status = Status.Filled
+        trade3.status.deal_quantity = 3
+        trade3.order.account.broker_id = "9999"
+        trade3.order.account.account_id = "9999999"
+        trade3.order.order_cond = StockOrderCond.Cash
+        trade3.order.action = Action.Buy
+        trade3.contract.code = "2330"
+
+        # Trade 4: Zero deal quantity (should be skipped)
+        trade4 = Mock()
+        trade4.status.status = Status.Filled
+        trade4.status.deal_quantity = 0
+        trade4.order.account.broker_id = "9100"
+        trade4.order.account.account_id = "1234567"
+        trade4.order.order_cond = StockOrderCond.Cash
+        trade4.order.action = Action.Buy
+        trade4.contract.code = "2330"
+
+        # Trade 5: Futures order (no order_cond, should be skipped)
+        trade5 = Mock()
+        trade5.status.status = Status.Filled
+        trade5.status.deal_quantity = 1
+        trade5.order.account.broker_id = "9100"
+        trade5.order.account.account_id = "1234567"
+        trade5.order.action = Action.Buy
+        trade5.contract.code = "TXFJ4"
+        # No order_cond attribute
+
+        # Trade 6: AttributeError (should be skipped)
+        trade6 = Mock()
+        trade6.status.status = Status.Filled
+        trade6.status.deal_quantity = 2
+        # Missing account attribute will raise AttributeError
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.list_trades.return_value = [
+            trade1,
+            trade2,
+            trade3,
+            trade4,
+            trade5,
+            trade6,
+        ]
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api, sync_threshold=0)
+
+        # Should handle all edge cases without crashing
+        # Only trade1 should be counted
+        positions = sync.list_positions()
+        assert len(positions) == 1

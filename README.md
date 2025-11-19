@@ -8,6 +8,8 @@
 
 Real-time position synchronization for Shioaji.
 
+English | [繁體中文](README.zh-TW.md)
+
 ## Overview
 
 `sj_sync` provides real-time position tracking using deal callbacks instead of repeatedly calling `api.list_positions()`. This approach:
