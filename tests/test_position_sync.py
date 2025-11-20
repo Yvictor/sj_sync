@@ -123,7 +123,7 @@ class TestPositionSyncInitialization:
         mock_api.list_accounts.return_value = [account1, account2]
 
         # Setup list_positions to return different results per account
-        def list_positions_side_effect(account, unit):
+        def list_positions_side_effect(account, unit, timeout=5000):
             if account == account1:
                 return [pnl1]
             elif account == account2:

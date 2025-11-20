@@ -32,7 +32,7 @@ class PositionSync:
         positions = sync.list_positions(account=api.stock_account)  # Filter by account
     """
 
-    def __init__(self, api: sj.Shioaji, sync_threshold: int = 0):
+    def __init__(self, api: sj.Shioaji, sync_threshold: int = 0, timeout: int = 5000):
         """Initialize PositionSync with Shioaji API instance.
 
         Automatically loads all positions and registers deal callback.
@@ -43,9 +43,11 @@ class PositionSync:
                           - 0: Always use local calculated positions (default)
                           - >0: Use local positions for N seconds after deal,
                                 then switch to API and compare
+            timeout: API query timeout in milliseconds (default: 5000)
         """
         self.api = api
         self.sync_threshold = sync_threshold
+        self.timeout = timeout
         self.api.set_order_callback(self.on_order_deal_event)
 
         # Separate dicts for stock and futures positions
@@ -104,7 +106,7 @@ class PositionSync:
             try:
                 # Load positions for this account
                 positions_pnl = self.api.list_positions(
-                    account=account, unit=Unit.Common
+                    account=account, unit=Unit.Common, timeout=self.timeout
                 )
             except Exception as e:
                 logger.warning(f"Failed to load positions for account {account}: {e}")
@@ -354,8 +356,11 @@ class PositionSync:
 
         return []
 
-    def list_positions(  # noqa: ARG002
-        self, account: Optional[Account] = None, unit: Unit = Unit.Common
+    def list_positions(
+        self,
+        account: Optional[Account] = None,
+        unit: Unit = Unit.Common,
+        timeout: Optional[int] = None,
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Get all current positions.
 
@@ -368,6 +373,7 @@ class PositionSync:
         Args:
             account: Account to filter. None uses default stock_account first, then futopt_account if no stock.
             unit: Unit.Common or Unit.Share (for compatibility, not used in real-time tracking)
+            timeout: Query timeout in milliseconds (only used when querying API). None uses instance default.
 
         Returns:
             List of position objects for the specified account type:
@@ -375,6 +381,9 @@ class PositionSync:
             - Futures account: List[FuturesPosition]
             - None (default): List[StockPosition] from stock_account, or List[FuturesPosition] if no stock
         """
+        # Use instance default timeout if not specified
+        query_timeout = timeout if timeout is not None else self.timeout
+
         # sync_threshold = 0: Always use local
         if self.sync_threshold == 0:
             return self._get_local_positions(account)
@@ -386,16 +395,20 @@ class PositionSync:
 
         # Stable period: Query API and compare
         logger.debug("In stable period, querying API positions")
-        return self._query_and_check_positions(account, unit)
+        return self._query_and_check_positions(account, unit, query_timeout)
 
     def _query_and_check_positions(
-        self, account: Optional[Account] = None, unit: Unit = Unit.Common
+        self,
+        account: Optional[Account] = None,
+        unit: Unit = Unit.Common,
+        timeout: int = 5000,
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Query API positions, return immediately, then compare and update local in background.
 
         Args:
             account: Account to query
             unit: Unit type for query
+            timeout: Query timeout in milliseconds
 
         Returns:
             API positions (converted to our format)
@@ -412,7 +425,7 @@ class PositionSync:
         # Query API
         try:
             api_positions_pnl = self.api.list_positions(
-                account=query_account, unit=unit
+                account=query_account, unit=unit, timeout=timeout
             )
         except Exception as e:
             logger.error(f"Failed to query API positions: {e}, falling back to local")
