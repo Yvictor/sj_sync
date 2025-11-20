@@ -94,9 +94,26 @@ sync_local_only = PositionSync(api, sync_threshold=0)  # Disabled
 print("Local-only mode: disabled")
 
 # ============================================================================
-# Example 4: Handling Midday Restart
+# Example 4: Custom Timeout Settings
 # ============================================================================
-print("\n=== Example 4: Midday Restart Support ===")
+print("\n=== Example 4: Custom Timeout Settings ===")
+
+# Set default timeout during initialization (in milliseconds)
+sync_timeout = PositionSync(api, sync_threshold=30, timeout=10000)  # 10 seconds
+print("Default timeout: 10 seconds")
+
+# Override timeout for specific query
+positions = sync_timeout.list_positions(timeout=3000)  # 3 seconds for this call
+print(f"Query with 3s timeout: {len(positions)} positions")
+
+# Use default timeout (no timeout parameter specified)
+positions = sync_timeout.list_positions()  # Uses 10s default
+print(f"Query with default timeout: {len(positions)} positions")
+
+# ============================================================================
+# Example 5: Handling Midday Restart
+# ============================================================================
+print("\n=== Example 5: Midday Restart Support ===")
 
 # If you restart your program during trading hours:
 # - PositionSync automatically loads today's trades via api.list_trades()

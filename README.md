@@ -121,7 +121,7 @@ class FuturesPosition(BaseModel):
 
 ### PositionSync
 
-#### `__init__(api: sj.Shioaji, sync_threshold: int = 0)`
+#### `__init__(api: sj.Shioaji, sync_threshold: int = 0, timeout: int = 5000)`
 Initialize with Shioaji API instance.
 
 **Args:**
@@ -129,18 +129,20 @@ Initialize with Shioaji API instance.
 - `sync_threshold`: Smart sync threshold in seconds (default: 0)
   - `0`: Disabled - always use local calculations
   - `>0`: Enabled - use local for N seconds after deal, then query API
+- `timeout`: API query timeout in milliseconds (default: 5000)
 
 **Automatically:**
 - Loads all positions from all accounts
 - Registers deal callback for real-time updates
 - Calculates `yd_offset_quantity` from today's trades (for midday restart)
 
-#### `list_positions(account: Optional[Account] = None, unit: Unit = Unit.Common) -> Union[List[StockPosition], List[FuturesPosition]]`
+#### `list_positions(account: Optional[Account] = None, unit: Unit = Unit.Common, timeout: Optional[int] = None) -> Union[List[StockPosition], List[FuturesPosition]]`
 Get current positions.
 
 **Args:**
 - `account`: Account to filter. `None` uses default account (stock_account first, then futopt_account if no stock)
 - `unit`: `Unit.Common` (lots) or `Unit.Share` (shares) - for compatibility, not used in real-time tracking
+- `timeout`: Query timeout in milliseconds. `None` uses instance default (set in `__init__`)
 
 **Returns:**
 - Stock account: `List[StockPosition]`

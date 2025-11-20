@@ -121,7 +121,7 @@ class FuturesPosition(BaseModel):
 
 ### PositionSync
 
-#### `__init__(api: sj.Shioaji, sync_threshold: int = 0)`
+#### `__init__(api: sj.Shioaji, sync_threshold: int = 0, timeout: int = 5000)`
 使用 Shioaji API 實例初始化。
 
 **參數：**
@@ -129,18 +129,20 @@ class FuturesPosition(BaseModel):
 - `sync_threshold`：智能同步門檻值（秒），預設：0
   - `0`：停用 - 總是使用本地計算
   - `>0`：啟用 - 成交後 N 秒使用本地，之後查詢 API
+- `timeout`：API 查詢逾時時間（毫秒），預設：5000
 
 **自動執行：**
 - 載入所有帳戶的部位
 - 註冊成交回報
 - 從當日交易計算 `yd_offset_quantity`（盤中重啟用）
 
-#### `list_positions(account: Optional[Account] = None, unit: Unit = Unit.Common) -> Union[List[StockPosition], List[FuturesPosition]]`
+#### `list_positions(account: Optional[Account] = None, unit: Unit = Unit.Common, timeout: Optional[int] = None) -> Union[List[StockPosition], List[FuturesPosition]]`
 取得目前部位。
 
 **參數：**
 - `account`：篩選帳戶。`None` 使用預設帳戶（優先 stock_account，其次 futopt_account）
 - `unit`：`Unit.Common`（張）或 `Unit.Share`（股）- 為相容性保留，即時追蹤不使用
+- `timeout`：查詢逾時時間（毫秒）。`None` 使用實例預設值（在 `__init__` 設定）
 
 **回傳：**
 - 股票帳戶：`List[StockPosition]`
