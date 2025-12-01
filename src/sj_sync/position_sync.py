@@ -720,7 +720,13 @@ class PositionSync:
             deal: Deal data from callback
             is_futures: True if futures/options deal, False if stock deal
         """
-        code = deal.get("code")
+        # For futures, use full_code to get complete contract code
+        # For stocks, use code
+        if is_futures:
+            code = deal.get("full_code") or deal.get("code")
+        else:
+            code = deal.get("code")
+
         action_value = deal.get("action")
         quantity = deal.get("quantity", 0)
         price = deal.get("price", 0)

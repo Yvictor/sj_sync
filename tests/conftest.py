@@ -146,7 +146,8 @@ def sample_futures_deal():
     """Sample futures deal event data."""
     return {
         "trade_id": "test_fut",
-        "code": "TXFJ4",
+        "code": "TXF",  # Only first 3 characters
+        "full_code": "TXFJ4",  # Complete contract code
         "action": "Buy",
         "quantity": 1,
         "price": 17050.0,
