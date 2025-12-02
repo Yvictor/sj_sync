@@ -57,15 +57,21 @@ def position_sync(context):
 def create_deal(code: str, action: str, quantity: int, order_cond: str, account):
     """Helper to create deal event data."""
     return {
-        "code": code,
+        "trade_id": "test123",
+        "seqno": "269866",
+        "ordno": "IN497",
+        "exchange_seq": "669915",
+        "broker_id": account.broker_id,
+        "account_id": account.account_id,
         "action": action,
-        "quantity": quantity,
-        "price": 500.0,  # Price doesn't affect offset logic
+        "code": code,
         "order_cond": order_cond,
-        "account": {
-            "broker_id": account.broker_id,
-            "account_id": account.account_id,
-        },
+        "order_lot": "Common",
+        "price": 500.0,
+        "quantity": quantity,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577256.354,
     }
 
 

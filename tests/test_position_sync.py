@@ -7,6 +7,27 @@ from sj_sync.position_sync import PositionSync
 from sj_sync.models import FuturesPosition, StockPosition
 
 
+def create_stock_deal(account, code: str, action: str, quantity: int, price: float, order_cond: str = "Cash"):
+    """Helper to create stock deal event data matching official API format."""
+    return {
+        "trade_id": f"test_{code}_{action}",
+        "seqno": "269866",
+        "ordno": "IN497",
+        "exchange_seq": "669915",
+        "broker_id": account.broker_id,
+        "account_id": account.account_id,
+        "action": action,
+        "code": code,
+        "order_cond": order_cond,
+        "order_lot": "Common",
+        "price": price,
+        "quantity": quantity,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577256.354,
+    }
+
+
 class TestPositionSyncInitialization:
     """Test position initialization from list_positions()."""
 
@@ -158,9 +179,6 @@ class TestStockDealEvents:
         mock_api.list_positions.return_value = []
         sync = PositionSync(mock_api)
 
-        # Add account to deal
-        sample_stock_deal["account"] = mock_api.stock_account
-
         # Simulate deal callback
         sync.on_order_deal_event(OrderState.StockDeal, sample_stock_deal)
 
@@ -190,7 +208,6 @@ class TestStockDealEvents:
         assert positions[0].quantity == 10
 
         # Buy 2 more lots with same account
-        sample_stock_deal["account"] = account
         sync.on_order_deal_event(OrderState.StockDeal, sample_stock_deal)
 
         positions = sync.list_positions()
@@ -217,7 +234,6 @@ class TestStockDealEvents:
         assert positions[0].quantity == 10
 
         # Sell 3 lots with same account
-        sample_sell_deal["account"] = account
         sync.on_order_deal_event(OrderState.StockDeal, sample_sell_deal)
 
         positions = sync.list_positions()
@@ -243,12 +259,21 @@ class TestStockDealEvents:
 
         # Sell exactly 10 lots to close with same account
         close_deal = {
-            "code": "2330",
+            "trade_id": "test_close",
+            "seqno": "269900",
+            "ordno": "IN500",
+            "exchange_seq": "669920",
+            "broker_id": account.broker_id,
+            "account_id": account.account_id,
             "action": "Sell",
-            "quantity": 10,
-            "price": 510.0,
+            "code": "2330",
             "order_cond": "Cash",
-            "account": account,
+            "order_lot": "Common",
+            "price": 510.0,
+            "quantity": 10,
+            "web_id": "137",
+            "custom_field": "",
+            "ts": 1673577300.0,
         }
         sync.on_order_deal_event(OrderState.StockDeal, close_deal)
 
@@ -272,14 +297,7 @@ class TestDayTrading:
         sync = PositionSync(mock_api)
 
         # Buy 5 lots
-        buy_deal = {
-            "code": "2454",
-            "action": "Buy",
-            "quantity": 5,
-            "price": 200.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        buy_deal = create_stock_deal(account, "2454", "Buy", 5, 200.0)
         sync.on_order_deal_event(OrderState.StockDeal, buy_deal)
 
         positions = sync.list_positions()
@@ -287,14 +305,7 @@ class TestDayTrading:
         assert positions[0].quantity == 5
 
         # Sell 5 lots (close position)
-        sell_deal = {
-            "code": "2454",
-            "action": "Sell",
-            "quantity": 5,
-            "price": 205.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        sell_deal = create_stock_deal(account, "2454", "Sell", 5, 205.0)
         sync.on_order_deal_event(OrderState.StockDeal, sell_deal)
 
         # Position should be removed after day trading close
@@ -313,25 +324,11 @@ class TestDayTrading:
         sync = PositionSync(mock_api)
 
         # Buy 10 lots
-        buy_deal = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 10,
-            "price": 500.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        buy_deal = create_stock_deal(account, "2330", "Buy", 10, 500.0)
         sync.on_order_deal_event(OrderState.StockDeal, buy_deal)
 
         # Sell 7 lots (partial close)
-        sell_deal = {
-            "code": "2330",
-            "action": "Sell",
-            "quantity": 7,
-            "price": 505.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        sell_deal = create_stock_deal(account, "2330", "Sell", 7, 505.0)
         sync.on_order_deal_event(OrderState.StockDeal, sell_deal)
 
         positions = sync.list_positions()
@@ -354,25 +351,11 @@ class TestMarginAndShortSelling:
         sync = PositionSync(mock_api)
 
         # Buy cash
-        cash_deal = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 10,
-            "price": 500.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        cash_deal = create_stock_deal(account, "2330", "Buy", 10, 500.0, "Cash")
         sync.on_order_deal_event(OrderState.StockDeal, cash_deal)
 
         # Buy margin
-        margin_deal = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 5,
-            "price": 500.0,
-            "order_cond": "MarginTrading",
-            "account": account,
-        }
+        margin_deal = create_stock_deal(account, "2330", "Buy", 5, 500.0, "MarginTrading")
         sync.on_order_deal_event(OrderState.StockDeal, margin_deal)
 
         positions = sync.list_positions()
@@ -403,7 +386,6 @@ class TestMarginAndShortSelling:
         mock_api.list_positions.return_value = []
         sync = PositionSync(mock_api)
 
-        sample_short_deal["account"] = account
         sync.on_order_deal_event(OrderState.StockDeal, sample_short_deal)
 
         positions = sync.list_positions()
@@ -427,7 +409,6 @@ class TestFuturesDealEvents:
         mock_api.list_positions.return_value = []
         sync = PositionSync(mock_api)
 
-        sample_futures_deal["account"] = account
         sync.on_order_deal_event(OrderState.FuturesDeal, sample_futures_deal)
 
         positions = sync.list_positions()
@@ -455,25 +436,11 @@ class TestMultipleAccounts:
         sync = PositionSync(mock_api)
 
         # Account1 buys
-        deal1 = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 10,
-            "price": 500.0,
-            "order_cond": "Cash",
-            "account": account1,
-        }
+        deal1 = create_stock_deal(account1, "2330", "Buy", 10, 500.0)
         sync.on_order_deal_event(OrderState.StockDeal, deal1)
 
         # Account2 buys same stock
-        deal2 = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 5,
-            "price": 500.0,
-            "order_cond": "Cash",
-            "account": account2,
-        }
+        deal2 = create_stock_deal(account2, "2330", "Buy", 5, 500.0)
         sync.on_order_deal_event(OrderState.StockDeal, deal2)
 
         # Default account positions (only account1)
@@ -567,14 +534,7 @@ class TestSmartSync:
         sync = PositionSync(mock_api, sync_threshold=5)
 
         # Simulate a deal event
-        deal = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 1,
-            "price": 500.0,
-            "order_cond": "Cash",
-            "account": account,
-        }
+        deal = create_stock_deal(account, "2330", "Buy", 1, 500.0)
         sync.on_order_deal_event(OrderState.StockDeal, deal)
 
         # Clear the initialization call

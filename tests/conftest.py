@@ -94,11 +94,20 @@ def sample_stock_deal():
     """Sample stock deal event data."""
     return {
         "trade_id": "test123",
-        "code": "2330",
+        "seqno": "269866",
+        "ordno": "IN497",
+        "exchange_seq": "669915",
+        "broker_id": "9100",
+        "account_id": "1234567",
         "action": "Buy",
-        "quantity": 2,
-        "price": 505.0,
+        "code": "2330",
         "order_cond": "Cash",
+        "order_lot": "Common",
+        "price": 505.0,
+        "quantity": 2,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577256.354,
     }
 
 
@@ -107,11 +116,20 @@ def sample_sell_deal():
     """Sample stock sell deal event data."""
     return {
         "trade_id": "test456",
-        "code": "2330",
+        "seqno": "269867",
+        "ordno": "IN498",
+        "exchange_seq": "669916",
+        "broker_id": "9100",
+        "account_id": "1234567",
         "action": "Sell",
-        "quantity": 3,
-        "price": 510.0,
+        "code": "2330",
         "order_cond": "Cash",
+        "order_lot": "Common",
+        "price": 510.0,
+        "quantity": 3,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577260.354,
     }
 
 
@@ -120,11 +138,20 @@ def sample_margin_deal():
     """Sample margin trading deal event."""
     return {
         "trade_id": "test789",
-        "code": "2317",
+        "seqno": "269868",
+        "ordno": "IN499",
+        "exchange_seq": "669917",
+        "broker_id": "9100",
+        "account_id": "1234567",
         "action": "Buy",
-        "quantity": 2,
-        "price": 105.0,
+        "code": "2317",
         "order_cond": "MarginTrading",
+        "order_lot": "Common",
+        "price": 105.0,
+        "quantity": 2,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577264.354,
     }
 
 
@@ -133,11 +160,20 @@ def sample_short_deal():
     """Sample short selling deal event."""
     return {
         "trade_id": "test101",
-        "code": "2454",
+        "seqno": "269869",
+        "ordno": "IN500",
+        "exchange_seq": "669918",
+        "broker_id": "9100",
+        "account_id": "1234567",
         "action": "Sell",
-        "quantity": 1,
-        "price": 205.0,
+        "code": "2454",
         "order_cond": "ShortSelling",
+        "order_lot": "Common",
+        "price": 205.0,
+        "quantity": 1,
+        "web_id": "137",
+        "custom_field": "",
+        "ts": 1673577268.354,
     }
 
 
@@ -146,9 +182,22 @@ def sample_futures_deal():
     """Sample futures deal event data."""
     return {
         "trade_id": "test_fut",
-        "code": "TXF",  # Only first 3 characters
-        "full_code": "TXFJ4",  # Complete contract code
+        "seqno": "458545",
+        "ordno": "tA0deX1O",
+        "exchange_seq": "j5006396",
+        "broker_id": "9100",
+        "account_id": "1234567",
         "action": "Buy",
-        "quantity": 1,
+        "code": "TXF",
+        "full_code": "TXFJ4",  # Complete contract code (code + delivery month)
         "price": 17050.0,
+        "quantity": 1,
+        "subaccount": "",
+        "security_type": "FUT",
+        "delivery_month": "202401",
+        "strike_price": 0.0,
+        "option_right": "Future",
+        "market_type": "Day",
+        "combo": False,
+        "ts": 1673270852.0,
     }

@@ -10,6 +10,7 @@ from shioaji.account import Account, AccountType
 from shioaji.position import StockPosition as SjStockPostion
 from shioaji.position import FuturePosition as SjFuturePostion
 from .models import StockPosition, StockPositionInner, FuturesPosition, AccountDict
+from .types import StockDeal, FuturesDeal
 
 
 class StockInconsistency(TypedDict):
@@ -699,7 +700,9 @@ class PositionSync:
             f"Updated local futures positions from API for account {account_key}"
         )
 
-    def on_order_deal_event(self, state: OrderState, data: Dict) -> None:
+    def on_order_deal_event(
+        self, state: OrderState, data: Union[StockDeal, FuturesDeal, Dict]
+    ) -> None:
         """Callback for order deal events.
 
         Args:
@@ -713,7 +716,9 @@ class PositionSync:
         elif state == OrderState.FuturesDeal:
             self._update_position(data, is_futures=True)
 
-    def _update_position(self, deal: Dict, is_futures: bool = False) -> None:
+    def _update_position(
+        self, deal: Union[StockDeal, FuturesDeal, Dict], is_futures: bool = False
+    ) -> None:
         """Update position based on deal event.
 
         Args:
@@ -730,11 +735,20 @@ class PositionSync:
         action_value = deal.get("action")
         quantity = deal.get("quantity", 0)
         price = deal.get("price", 0)
-        account = deal.get("account")
 
-        if not code or not action_value or not account:
+        # Get account info from broker_id and account_id fields
+        broker_id = deal.get("broker_id")
+        account_id = deal.get("account_id")
+
+        if not code or not action_value or not broker_id or not account_id:
             logger.warning(f"Deal missing required fields: {deal}")
             return
+
+        # Create AccountDict from deal data
+        account: AccountDict = {
+            "broker_id": broker_id,
+            "account_id": account_id,
+        }
 
         action = self._normalize_direction(action_value)
 
