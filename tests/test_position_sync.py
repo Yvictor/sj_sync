@@ -7,7 +7,14 @@ from sj_sync.position_sync import PositionSync
 from sj_sync.models import FuturesPosition, StockPosition
 
 
-def create_stock_deal(account, code: str, action: str, quantity: int, price: float, order_cond: str = "Cash"):
+def create_stock_deal(
+    account,
+    code: str,
+    action: str,
+    quantity: int,
+    price: float,
+    order_cond: str = "Cash",
+):
     """Helper to create stock deal event data matching official API format."""
     return {
         "trade_id": f"test_{code}_{action}",
@@ -355,7 +362,9 @@ class TestMarginAndShortSelling:
         sync.on_order_deal_event(OrderState.StockDeal, cash_deal)
 
         # Buy margin
-        margin_deal = create_stock_deal(account, "2330", "Buy", 5, 500.0, "MarginTrading")
+        margin_deal = create_stock_deal(
+            account, "2330", "Buy", 5, 500.0, "MarginTrading"
+        )
         sync.on_order_deal_event(OrderState.StockDeal, margin_deal)
 
         positions = sync.list_positions()
