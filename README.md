@@ -21,6 +21,7 @@ English | [繁體中文](README.zh-TW.md)
 ## Features
 
 - ✅ **Real-time updates** via `OrderState.StockDeal` and `OrderState.FuturesDeal` callbacks
+- ✅ **Custom callback support**: Register your own callback while maintaining auto-sync
 - ✅ **Smart sync mode**: Intelligently switches between local calculations and API queries
 - ✅ **Multiple trading types**: Cash, margin trading, short selling, day trading settlement
 - ✅ **Futures/options support**: Tracks futures and options positions
@@ -95,6 +96,47 @@ sync = PositionSync(api, sync_threshold=30)
 - `sync_threshold=30`: Use local for 30s after deals, then query API
 - `sync_threshold=60`: Use local for 60s after deals, then query API
 
+### Custom Callback
+
+Register your own callback to receive deal events while maintaining automatic position synchronization:
+
+```python
+from sj_sync import PositionSync, OrderDealCallback
+from shioaji.constant import OrderState
+
+# Create PositionSync instance
+sync = PositionSync(api, sync_threshold=30)
+
+# Define your custom callback
+def my_callback(state: OrderState, data: dict) -> None:
+    if state == OrderState.StockDeal:
+        print(f"Stock deal: {data.get('code')} {data.get('action')} "
+              f"{data.get('quantity')} @ {data.get('price')}")
+    elif state == OrderState.FuturesDeal:
+        print(f"Futures deal: {data.get('code')} {data.get('action')} "
+              f"{data.get('quantity')} @ {data.get('price')}")
+
+    # Add your custom logic here:
+    # - Send notifications
+    # - Update database
+    # - Trigger trading strategies
+    # etc.
+
+# Register your callback
+sync.set_order_callback(my_callback)
+
+# Now when deals occur:
+# 1. PositionSync automatically updates positions (internal)
+# 2. Your callback is called for custom processing
+# 3. You can query updated positions anytime
+positions = sync.list_positions()
+```
+
+**Callback Chain:**
+- `PositionSync` processes deal events first (updates positions)
+- Your callback is then invoked with the same event data
+- Exceptions in user callback are caught and logged (won't break position sync)
+
 ## Position Models
 
 ### StockPosition
@@ -158,6 +200,22 @@ positions = sync.list_positions()
 stock_positions = sync.list_positions(account=api.stock_account)
 futures_positions = sync.list_positions(account=api.futopt_account)
 ```
+
+#### `set_order_callback(callback: OrderDealCallback) -> None`
+Register a custom callback to receive deal events.
+
+**Args:**
+- `callback`: Function with signature `(state: OrderState, data: Dict) -> None`
+
+**Example:**
+```python
+def my_callback(state, data):
+    print(f"Deal: {data}")
+
+sync.set_order_callback(my_callback)
+```
+
+**Note:** Your callback is invoked after `PositionSync` processes the event. Exceptions in user callback are caught and logged.
 
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 Callback for order deal events. Automatically registered on init.

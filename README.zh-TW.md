@@ -21,6 +21,7 @@ Shioaji 的即時部位同步工具。
 ## 功能特色
 
 - ✅ **即時更新**：透過 `OrderState.StockDeal` 和 `OrderState.FuturesDeal` 回報
+- ✅ **自訂回報支援**：註冊自己的回報處理函式，同時保持自動同步
 - ✅ **智能同步模式**：智慧切換本地計算與 API 查詢
 - ✅ **多種交易類型**：現股、融資、融券、當沖結算
 - ✅ **期貨選擇權支援**：追蹤期貨和選擇權部位
@@ -95,6 +96,47 @@ sync = PositionSync(api, sync_threshold=30)
 - `sync_threshold=30`：成交後 30 秒使用本地，之後查詢 API
 - `sync_threshold=60`：成交後 60 秒使用本地，之後查詢 API
 
+### 自訂回報處理
+
+註冊自己的回報處理函式，同時保持自動部位同步：
+
+```python
+from sj_sync import PositionSync, OrderDealCallback
+from shioaji.constant import OrderState
+
+# 建立 PositionSync 實例
+sync = PositionSync(api, sync_threshold=30)
+
+# 定義自訂回報處理函式
+def my_callback(state: OrderState, data: dict) -> None:
+    if state == OrderState.StockDeal:
+        print(f"股票成交: {data.get('code')} {data.get('action')} "
+              f"{data.get('quantity')} @ {data.get('price')}")
+    elif state == OrderState.FuturesDeal:
+        print(f"期貨成交: {data.get('code')} {data.get('action')} "
+              f"{data.get('quantity')} @ {data.get('price')}")
+
+    # 在此加入自己的邏輯：
+    # - 發送通知
+    # - 更新資料庫
+    # - 觸發交易策略
+    # 等等
+
+# 註冊回報處理函式
+sync.set_order_callback(my_callback)
+
+# 當成交發生時：
+# 1. PositionSync 自動更新部位（內部處理）
+# 2. 您的回報處理函式被呼叫（自訂處理）
+# 3. 隨時可查詢更新後的部位
+positions = sync.list_positions()
+```
+
+**回報鏈：**
+- `PositionSync` 先處理成交事件（更新部位）
+- 接著呼叫您的回報處理函式
+- 使用者回報函式的例外會被捕捉並記錄（不會中斷部位同步）
+
 ## 部位模型
 
 ### StockPosition（股票部位）
@@ -158,6 +200,22 @@ positions = sync.list_positions()
 stock_positions = sync.list_positions(account=api.stock_account)
 futures_positions = sync.list_positions(account=api.futopt_account)
 ```
+
+#### `set_order_callback(callback: OrderDealCallback) -> None`
+註冊自訂回報處理函式以接收成交事件。
+
+**參數：**
+- `callback`：回報處理函式，簽名為 `(state: OrderState, data: Dict) -> None`
+
+**範例：**
+```python
+def my_callback(state, data):
+    print(f"成交: {data}")
+
+sync.set_order_callback(my_callback)
+```
+
+**注意：** 您的回報處理函式會在 `PositionSync` 處理事件後被呼叫。使用者回報函式的例外會被捕捉並記錄。
 
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 訂單成交事件回報。初始化時自動註冊。

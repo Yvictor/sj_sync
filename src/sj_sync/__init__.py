@@ -1,11 +1,12 @@
 """sj_sync - Real-time position synchronization for Shioaji."""
 
-from .position_sync import PositionSync
+from .position_sync import PositionSync, OrderDealCallback
 from .models import StockPosition, FuturesPosition, Position, AccountDict
 from .types import StockDeal, FuturesDeal
 
 __all__ = [
     "PositionSync",
+    "OrderDealCallback",
     "StockPosition",
     "FuturesPosition",
     "Position",

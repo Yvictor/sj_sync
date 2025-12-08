@@ -1,7 +1,7 @@
 """Real-time position synchronization for Shioaji."""
 
 from loguru import logger
-from typing import Dict, List, Optional, Union, Tuple, TypedDict, Literal
+from typing import Dict, List, Optional, Union, Tuple, TypedDict, Literal, Callable
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 import shioaji as sj
@@ -11,6 +11,9 @@ from shioaji.position import StockPosition as SjStockPostion
 from shioaji.position import FuturePosition as SjFuturePostion
 from .models import StockPosition, StockPositionInner, FuturesPosition, AccountDict
 from .types import StockDeal, FuturesDeal
+
+# Type alias for order deal callback
+OrderDealCallback = Callable[[OrderState, Union[StockDeal, FuturesDeal, Dict]], None]
 
 
 class StockInconsistency(TypedDict):
@@ -36,7 +39,7 @@ class PositionSync:
     def __init__(self, api: sj.Shioaji, sync_threshold: int = 0, timeout: int = 5000):
         """Initialize PositionSync with Shioaji API instance.
 
-        Automatically loads all positions and registers deal callback.
+        Automatically loads all positions and registers internal callback.
 
         Args:
             api: Shioaji API instance
@@ -49,7 +52,8 @@ class PositionSync:
         self.api = api
         self.sync_threshold = sync_threshold
         self.timeout = timeout
-        self.api.set_order_callback(self.on_order_deal_event)
+        self._user_callback: Optional[OrderDealCallback] = None
+        self.api.set_order_callback(self._internal_callback)
 
         # Separate dicts for stock and futures positions
         # Stock: {account_key: {(code, cond): StockPositionInner}}
@@ -699,6 +703,42 @@ class PositionSync:
         logger.info(
             f"Updated local futures positions from API for account {account_key}"
         )
+
+    def _internal_callback(
+        self, state: OrderState, data: Union[StockDeal, FuturesDeal, Dict]
+    ) -> None:
+        """Internal callback wrapper that chains to user callback.
+
+        Args:
+            state: OrderState enum value
+            data: Order/deal data dictionary
+        """
+        # Process position update first
+        self.on_order_deal_event(state, data)
+
+        # Then call user callback if registered
+        if self._user_callback is not None:
+            try:
+                self._user_callback(state, data)
+            except Exception as e:
+                logger.error(f"Error in user callback: {e}")
+
+    def set_order_callback(self, callback: OrderDealCallback) -> None:
+        """Set user callback for order deal events.
+
+        This allows users to register their own callback while still
+        maintaining automatic position synchronization.
+
+        Args:
+            callback: User callback function with signature (state, data) -> None
+
+        Example:
+            >>> sync = PositionSync(api)
+            >>> def my_callback(state, data):
+            ...     print(f"Deal event: {data}")
+            >>> sync.set_order_callback(my_callback)
+        """
+        self._user_callback = callback
 
     def on_order_deal_event(
         self, state: OrderState, data: Union[StockDeal, FuturesDeal, Dict]

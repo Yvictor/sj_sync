@@ -490,13 +490,43 @@ class TestEdgeCases:
         assert len(positions) == 0
 
     def test_callback_registration(self, mock_api):
-        """Test that order callback is registered on init."""
+        """Test that internal callback is registered on init."""
         mock_api.list_positions.return_value = []
         sync = PositionSync(mock_api)
 
         mock_api.set_order_callback.assert_called_once()
         callback = mock_api.set_order_callback.call_args[0][0]
-        assert callback == sync.on_order_deal_event
+        assert callback == sync._internal_callback
+
+    def test_user_callback_registration(self, mock_api):
+        """Test that user callback can be registered and is called."""
+        from shioaji.constant import OrderState
+
+        mock_api.list_positions.return_value = []
+        sync = PositionSync(mock_api)
+
+        # Create a mock user callback
+        user_callback = Mock()
+
+        # Register user callback
+        sync.set_order_callback(user_callback)
+
+        # Simulate a deal event
+        deal_data = {
+            "code": "2330",
+            "action": "Buy",
+            "quantity": 1000,
+            "price": 500.0,
+            "broker_id": "F002000",
+            "account_id": "1234567",
+            "order_cond": "Cash",
+        }
+
+        # Call internal callback (which should trigger user callback)
+        sync._internal_callback(OrderState.StockDeal, deal_data)
+
+        # Verify user callback was called
+        user_callback.assert_called_once_with(OrderState.StockDeal, deal_data)
 
 
 class TestSmartSync:

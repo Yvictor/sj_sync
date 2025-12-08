@@ -125,3 +125,42 @@ positions = sync_restart.list_positions()
 
 print(f"Positions after restart: {len(positions)}")
 # All position quantities and yesterday's tracking will be accurate!
+
+# ============================================================================
+# Example 6: Using Custom Callback with Auto-Sync
+# ============================================================================
+print("\n=== Example 6: Custom Callback ===")
+
+# PositionSync automatically handles position updates internally
+# But you can also register your own callback to receive deal events
+sync_callback = PositionSync(api, sync_threshold=30)
+
+
+# Define your custom callback
+def my_deal_callback(state, data):
+    """Custom callback to handle deal events."""
+    from shioaji.constant import OrderState
+
+    if state == OrderState.StockDeal:
+        print(f"Stock deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}")
+    elif state == OrderState.FuturesDeal:
+        print(f"Futures deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}")
+
+    # You can add your custom logic here
+    # - Send notifications
+    # - Update database
+    # - Trigger trading strategies
+    # etc.
+
+
+# Register your callback - positions are still auto-updated by PositionSync
+sync_callback.set_order_callback(my_deal_callback)
+
+print("Custom callback registered. Positions auto-sync + custom notifications enabled!")
+
+# Now when deals occur:
+# 1. PositionSync automatically updates positions (internal)
+# 2. Your callback is called for custom processing
+# 3. You can query updated positions anytime
+positions = sync_callback.list_positions()
+print(f"Current positions: {len(positions)}")
