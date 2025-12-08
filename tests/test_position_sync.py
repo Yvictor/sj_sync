@@ -528,6 +528,47 @@ class TestEdgeCases:
         # Verify user callback was called
         user_callback.assert_called_once_with(OrderState.StockDeal, deal_data)
 
+    def test_user_callback_exception_handling(self, mock_api):
+        """Test that exceptions in user callback are caught and logged."""
+        from shioaji.constant import OrderState
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        mock_api.list_positions.return_value = []
+
+        # Setup mock stock account
+        stock_account = create_mock_account("F002000", "1234567", AccountType.Stock)
+        mock_api.stock_account = stock_account
+
+        sync = PositionSync(mock_api)
+
+        # Create a callback that raises an exception
+        def failing_callback(state, data):
+            raise ValueError("Test exception")
+
+        # Register failing callback
+        sync.set_order_callback(failing_callback)
+
+        # Simulate a deal event
+        deal_data = {
+            "code": "2330",
+            "action": "Buy",
+            "quantity": 1000,
+            "price": 500.0,
+            "broker_id": "F002000",
+            "account_id": "1234567",
+            "order_cond": "Cash",
+        }
+
+        # Call internal callback - should not raise exception
+        sync._internal_callback(OrderState.StockDeal, deal_data)
+
+        # Verify position was still updated despite callback error
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        assert positions[0].code == "2330"
+        assert positions[0].quantity == 1000
+
 
 class TestSmartSync:
     """Test smart sync feature with sync_threshold."""
