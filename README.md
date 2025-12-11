@@ -23,6 +23,7 @@ English | [繁體中文](README.zh-TW.md)
 - ✅ **Real-time updates** via `OrderState.StockDeal` and `OrderState.FuturesDeal` callbacks
 - ✅ **Custom callback support**: Register your own callback while maintaining auto-sync
 - ✅ **Smart sync mode**: Intelligently switches between local calculations and API queries
+- ✅ **Manual sync API**: Force sync with API server for reconciliation
 - ✅ **Multiple trading types**: Cash, margin trading, short selling, day trading settlement
 - ✅ **Futures/options support**: Tracks futures and options positions
 - ✅ **Yesterday's quantity tracking**: Maintains `yd_quantity` for each position
@@ -137,6 +138,35 @@ positions = sync.list_positions()
 - Your callback is then invoked with the same event data
 - Exceptions in user callback are caught and logged (won't break position sync)
 
+### Manual Sync
+
+Manually sync positions from API server when you need to ensure positions are up-to-date:
+
+```python
+from sj_sync import PositionSync
+
+# Create PositionSync instance
+sync = PositionSync(api)
+
+# Sync all accounts from API
+sync.sync_from_api()
+
+# Or sync a specific account
+sync.sync_from_api(account=api.stock_account)
+
+# Useful when:
+# - You want to verify positions against API server
+# - After network reconnection
+# - When you suspect local positions might be out of sync
+# - For manual reconciliation
+```
+
+**Use Cases:**
+- 🔄 **Manual reconciliation**: Force sync with API when needed
+- 🌐 **After reconnection**: Refresh positions after network issues
+- ✅ **Verification**: Double-check local positions against server
+- 🎯 **Selective sync**: Sync specific accounts or all accounts
+
 ## Position Models
 
 ### StockPosition
@@ -217,6 +247,32 @@ sync.set_order_callback(my_callback)
 
 **Note:** Your callback is invoked after `PositionSync` processes the event. Exceptions in user callback are caught and logged.
 
+#### `sync_from_api(account: Optional[Account] = None) -> None`
+Manually sync positions from API server.
+
+**Args:**
+- `account`: Specific account to sync. If `None`, syncs all accounts.
+
+**Example:**
+```python
+# Sync all accounts from API
+sync.sync_from_api()
+
+# Sync only stock account
+sync.sync_from_api(account=api.stock_account)
+
+# Sync only futures account
+sync.sync_from_api(account=api.futopt_account)
+```
+
+**Use Cases:**
+- Manual reconciliation with API server
+- After network reconnection
+- When you need to verify local positions
+- Force refresh regardless of `sync_threshold` setting
+
+**Note:** This method clears existing positions for the account(s) being synced and reloads from API server.
+
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 Callback for order deal events. Automatically registered on init.
 
@@ -247,7 +303,8 @@ Handles:
 
 - **After threshold period** (no recent deals):
   - Queries `api.list_positions()` for verification
-  - Returns API positions immediately to user
+  - **Race condition protection**: If deals occur during API query, returns fresh local positions instead
+  - Returns API positions immediately to user (if no concurrent deals)
   - Background thread compares API vs local positions
   - Auto-corrects any inconsistencies found
 
@@ -294,8 +351,8 @@ uv run zuban check src/
 
 Every push and pull request triggers automated:
 - ✅ Code quality checks (ruff, zuban)
-- ✅ All 50 tests (unit + BDD + smart sync)
-- ✅ Coverage report to Codecov (82%+)
+- ✅ All 62 tests (unit + BDD + smart sync)
+- ✅ Coverage report to Codecov (90%+)
 - ✅ Build verification
 
 See [CI Setup Guide](.github/CI_SETUP.md) for details.
@@ -304,19 +361,25 @@ See [CI Setup Guide](.github/CI_SETUP.md) for details.
 
 The project includes comprehensive pytest tests covering:
 
-**Unit Tests (25 tests):**
+**Unit Tests (37 tests):**
 - ✅ Position initialization from `list_positions()`
 - ✅ Buy/sell deal events
 - ✅ Day trading scenarios
 - ✅ Margin trading and short selling
 - ✅ Futures/options deals
 - ✅ Multi-account support
-- ✅ Smart sync mode (7 tests)
+- ✅ Custom callback support (3 tests)
+  - Callback registration
+  - User callback invocation
+  - Exception handling in user callback
+- ✅ Smart sync mode (10 tests)
   - Threshold disabled/enabled behavior
   - Unstable/stable period switching
   - Background position verification
   - Inconsistency detection and auto-correction
   - API query failure handling
+  - Manual sync API (`sync_from_api`)
+  - Race condition protection during API query
 - ✅ Edge cases and error handling
 
 **BDD Tests (25 scenarios in Chinese):**
@@ -328,10 +391,10 @@ The project includes comprehensive pytest tests covering:
 
 Run tests with:
 ```bash
-# All tests (50 total)
+# All tests (62 total)
 uv run pytest tests/ -v
 
-# With coverage report (82%+)
+# With coverage report (90%+)
 uv run pytest --cov=sj_sync --cov-report=html --cov-report=term-missing
 ```
 

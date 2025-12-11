@@ -23,6 +23,7 @@ Shioaji 的即時部位同步工具。
 - ✅ **即時更新**：透過 `OrderState.StockDeal` 和 `OrderState.FuturesDeal` 回報
 - ✅ **自訂回報支援**：註冊自己的回報處理函式，同時保持自動同步
 - ✅ **智能同步模式**：智慧切換本地計算與 API 查詢
+- ✅ **手動同步 API**：強制與 API 伺服器同步以進行對帳
 - ✅ **多種交易類型**：現股、融資、融券、當沖結算
 - ✅ **期貨選擇權支援**：追蹤期貨和選擇權部位
 - ✅ **昨日庫存追蹤**：維護每個部位的 `yd_quantity`
@@ -137,6 +138,35 @@ positions = sync.list_positions()
 - 接著呼叫您的回報處理函式
 - 使用者回報函式的例外會被捕捉並記錄（不會中斷部位同步）
 
+### 手動同步
+
+需要確保部位與 API 伺服器同步時，可手動觸發同步：
+
+```python
+from sj_sync import PositionSync
+
+# 建立 PositionSync 實例
+sync = PositionSync(api)
+
+# 從 API 同步所有帳戶
+sync.sync_from_api()
+
+# 或只同步特定帳戶
+sync.sync_from_api(account=api.stock_account)
+
+# 適用情境：
+# - 需要與 API 伺服器進行對帳驗證
+# - 網路重新連線後
+# - 懷疑本地部位可能不同步時
+# - 手動對帳需求
+```
+
+**使用情境：**
+- 🔄 **手動對帳**：需要時強制與 API 同步
+- 🌐 **重新連線後**：網路問題後刷新部位
+- ✅ **驗證**：對照本地部位與伺服器
+- 🎯 **選擇性同步**：同步特定帳戶或所有帳戶
+
 ## 部位模型
 
 ### StockPosition（股票部位）
@@ -217,6 +247,32 @@ sync.set_order_callback(my_callback)
 
 **注意：** 您的回報處理函式會在 `PositionSync` 處理事件後被呼叫。使用者回報函式的例外會被捕捉並記錄。
 
+#### `sync_from_api(account: Optional[Account] = None) -> None`
+手動從 API 伺服器同步部位。
+
+**參數：**
+- `account`：要同步的特定帳戶。若為 `None`，則同步所有帳戶。
+
+**範例：**
+```python
+# 從 API 同步所有帳戶
+sync.sync_from_api()
+
+# 只同步證券帳戶
+sync.sync_from_api(account=api.stock_account)
+
+# 只同步期貨帳戶
+sync.sync_from_api(account=api.futopt_account)
+```
+
+**使用情境：**
+- 手動與 API 伺服器對帳
+- 網路重新連線後
+- 需要驗證本地部位時
+- 不受 `sync_threshold` 設定影響的強制刷新
+
+**注意：** 此方法會清除要同步帳戶的現有部位，並從 API 伺服器重新載入。
+
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 訂單成交事件回報。初始化時自動註冊。
 
@@ -247,7 +303,8 @@ sync.set_order_callback(my_callback)
 
 - **門檻值期間後**（無近期成交）：
   - 查詢 `api.list_positions()` 驗證
-  - 立即回傳 API 部位給使用者
+  - **競態條件保護**：若 API 查詢期間發生成交，則回傳最新的本地部位
+  - 立即回傳 API 部位給使用者（若無並發成交）
   - 背景執行緒比對 API 與本地部位
   - 自動修正發現的任何不一致
 
@@ -294,8 +351,8 @@ uv run zuban check src/
 
 每次推送和 Pull Request 會自動觸發：
 - ✅ 程式碼品質檢查（ruff、zuban）
-- ✅ 所有 50 個測試（單元 + BDD + 智能同步）
-- ✅ 涵蓋率報告至 Codecov（82%+）
+- ✅ 所有 62 個測試（單元 + BDD + 智能同步）
+- ✅ 涵蓋率報告至 Codecov（90%+）
 - ✅ 建置驗證
 
 詳見 [CI 設定指南](.github/CI_SETUP.md)。
@@ -304,19 +361,25 @@ uv run zuban check src/
 
 專案包含完整的 pytest 測試：
 
-**單元測試（25 個測試）：**
+**單元測試（37 個測試）：**
 - ✅ 從 `list_positions()` 初始化部位
 - ✅ 買賣成交事件
 - ✅ 當沖情境
 - ✅ 融資融券
 - ✅ 期貨/選擇權成交
 - ✅ 多帳戶支援
-- ✅ 智能同步模式（7 個測試）
+- ✅ 自訂回報支援（3 個測試）
+  - 回報註冊
+  - 使用者回報呼叫
+  - 使用者回報例外處理
+- ✅ 智能同步模式（10 個測試）
   - 門檻值停用/啟用行為
   - 不穩定/穩定期間切換
   - 背景部位驗證
   - 不一致偵測與自動修正
   - API 查詢失敗處理
+  - 手動同步 API（`sync_from_api`）
+  - API 查詢期間的競態條件保護
 - ✅ 邊界案例與錯誤處理
 
 **BDD 測試（25 個場景，中文）：**
@@ -328,10 +391,10 @@ uv run zuban check src/
 
 執行測試：
 ```bash
-# 所有測試（50 個）
+# 所有測試（62 個）
 uv run pytest tests/ -v
 
-# 含涵蓋率報告（82%+）
+# 含涵蓋率報告（90%+）
 uv run pytest --cov=sj_sync --cov-report=html --cov-report=term-missing
 ```
 

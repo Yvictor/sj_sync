@@ -471,24 +471,6 @@ class TestMultipleAccounts:
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
-    def test_deal_without_required_fields(self, mock_api):
-        """Test handling deal event without required fields."""
-        mock_api.list_positions.return_value = []
-        sync = PositionSync(mock_api)
-
-        # Deal missing account
-        bad_deal = {
-            "code": "2330",
-            "action": "Buy",
-            "quantity": 1,
-            "price": 100.0,
-        }
-        sync.on_order_deal_event(OrderState.StockDeal, bad_deal)
-
-        # Should not crash, just log warning
-        positions = sync.list_positions()
-        assert len(positions) == 0
-
     def test_callback_registration(self, mock_api):
         """Test that internal callback is registered on init."""
         mock_api.list_positions.return_value = []
@@ -1056,3 +1038,118 @@ class TestSmartSync:
         # Only trade1 should be counted
         positions = sync.list_positions()
         assert len(positions) == 1
+
+    def test_sync_from_api_all_accounts(self, mock_api, sample_stock_pnl):
+        """Test sync_from_api() without account parameter syncs all accounts."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        stock_account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [stock_account]
+        mock_api.stock_account = stock_account
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.list_trades.return_value = []
+
+        sync = PositionSync(mock_api)
+
+        # Initial position
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        assert positions[0].quantity == 10
+
+        # Modify local position
+        account_key = sync._get_account_key(stock_account)
+        sync._stock_positions[account_key][
+            ("2330", StockOrderCond.Cash)
+        ].quantity = 2000
+
+        # Sync from API should reset to API value
+        sync.sync_from_api()
+
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        assert positions[0].quantity == 10  # Reset to API value
+
+    def test_sync_from_api_specific_account(self, mock_api, sample_stock_pnl):
+        """Test sync_from_api() with specific account parameter."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        stock_account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [stock_account]
+        mock_api.stock_account = stock_account
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+        mock_api.list_trades.return_value = []
+
+        sync = PositionSync(mock_api)
+
+        # Modify local position
+        account_key = sync._get_account_key(stock_account)
+        sync._stock_positions[account_key][
+            ("2330", StockOrderCond.Cash)
+        ].quantity = 2000
+
+        # Sync specific account from API
+        sync.sync_from_api(account=stock_account)
+
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        assert positions[0].quantity == 10  # Reset to API value
+
+    def test_deal_during_api_query_uses_local_positions(
+        self, mock_api, sample_stock_pnl
+    ):
+        """Test that deals occurring during API query cause return of local positions."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.constant import OrderState
+        import datetime
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+        mock_api.list_positions.return_value = [sample_stock_pnl]
+
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Set last deal time to past threshold so it will query API
+        account_key = sync._get_account_key(account)
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=2)
+        )
+
+        # Add a local position different from API
+        from shioaji.constant import StockOrderCond
+
+        sync._stock_positions[account_key] = {
+            ("2330", StockOrderCond.Cash): sync._stock_positions[account_key][
+                ("2330", StockOrderCond.Cash)
+            ]
+        }
+        sync._stock_positions[account_key][
+            ("2330", StockOrderCond.Cash)
+        ].quantity = 2000
+
+        # Simulate deal occurring during API query
+        def mock_list_positions_with_deal(*_args, **_kwargs):
+            # Simulate a deal happening during the query
+            deal_data = {
+                "code": "2330",
+                "action": "Buy",
+                "quantity": 500,
+                "price": 500.0,
+                "broker_id": "9100",
+                "account_id": "1234567",
+                "order_cond": "Cash",
+            }
+            sync._internal_callback(OrderState.StockDeal, deal_data)
+            return [sample_stock_pnl]
+
+        mock_api.list_positions.side_effect = mock_list_positions_with_deal
+
+        # Query positions - should detect deal and use local
+        positions = sync.list_positions()
+
+        # Should return local positions (2500) not API positions (1000)
+        assert len(positions) == 1
+        assert positions[0].quantity == 2500  # 2000 + 500 from deal during query

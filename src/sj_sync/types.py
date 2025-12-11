@@ -3,7 +3,7 @@
 from typing import TypedDict
 
 
-class StockDeal(TypedDict, total=False):
+class StockDeal(TypedDict):
     """Stock deal event data structure.
 
     Based on: https://sinotrade.github.io/zh/tutor/order/order_deal_event/stocks/
@@ -26,7 +26,7 @@ class StockDeal(TypedDict, total=False):
     ts: float
 
 
-class FuturesDeal(TypedDict, total=False):
+class FuturesDeal(TypedDict):
     """Futures/Options deal event data structure.
 
     Based on: https://sinotrade.github.io/zh/tutor/order/order_deal_event/futures/

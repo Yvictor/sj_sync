@@ -1,7 +1,17 @@
 """Real-time position synchronization for Shioaji."""
 
 from loguru import logger
-from typing import Dict, List, Optional, Union, Tuple, TypedDict, Literal, Callable
+from typing import (
+    Dict,
+    List,
+    Optional,
+    Union,
+    Tuple,
+    TypedDict,
+    Literal,
+    Callable,
+    cast,
+)
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 import shioaji as sj
@@ -106,60 +116,70 @@ class PositionSync:
         accounts = self.api.list_accounts()
 
         for account in accounts:
-            account_key = self._get_account_key(account)
+            self._sync_account_positions(account)
 
-            try:
-                # Load positions for this account
-                positions_pnl = self.api.list_positions(
-                    account=account, unit=Unit.Common, timeout=self.timeout
-                )
-            except Exception as e:
-                logger.warning(f"Failed to load positions for account {account}: {e}")
-                continue
+    def _sync_account_positions(self, account: Account) -> None:
+        """Sync positions from API for a specific account.
 
-            # Determine if this is stock or futures account based on account_type
-            account_type = account.account_type
-            if account_type == AccountType.Stock:
-                # Load and sum today's trades for this stock account
-                trades_sum = self._load_and_sum_today_trades(account)
+        Args:
+            account: Account to sync positions for
+        """
+        account_key = self._get_account_key(account)
 
-                for pnl in positions_pnl:
-                    if isinstance(pnl, SjStockPostion):
-                        # Calculate yd_offset_quantity
-                        yd_offset = self._calculate_yd_offset_for_position(
-                            code=pnl.code,
-                            cond=pnl.cond,
-                            direction=pnl.direction,
-                            yd_quantity=pnl.yd_quantity,
-                            trades_sum=trades_sum,
-                        )
+        try:
+            # Load positions for this account
+            positions_pnl = self.api.list_positions(
+                account=account, unit=Unit.Common, timeout=self.timeout
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load positions for account {account}: {e}")
+            return
 
-                        position = StockPositionInner(
-                            code=pnl.code,
-                            direction=pnl.direction,
-                            quantity=pnl.quantity,
-                            yd_quantity=pnl.yd_quantity,
-                            yd_offset_quantity=yd_offset,
-                            cond=pnl.cond,
-                        )
-                        if account_key not in self._stock_positions:
-                            self._stock_positions[account_key] = {}
-                        key = (position.code, position.cond)
-                        self._stock_positions[account_key][key] = position
+        # Determine if this is stock or futures account based on account_type
+        account_type = account.account_type
+        if account_type == AccountType.Stock:
+            # Load and sum today's trades for this stock account
+            trades_sum = self._load_and_sum_today_trades(account)
 
-            elif account_type == AccountType.Future:
-                for pnl in positions_pnl:
-                    if isinstance(pnl, SjFuturePostion):
-                        position = FuturesPosition(
-                            code=pnl.code,
-                            direction=pnl.direction,
-                            quantity=pnl.quantity,
-                        )
-                        if account_key not in self._futures_positions:
-                            self._futures_positions[account_key] = {}
-                        self._futures_positions[account_key][position.code] = position
+            # Clear existing positions for this account
+            self._stock_positions[account_key] = {}
 
-            logger.info(f"Initialized positions for account {account_key}")
+            for pnl in positions_pnl:
+                if isinstance(pnl, SjStockPostion):
+                    # Calculate yd_offset_quantity
+                    yd_offset = self._calculate_yd_offset_for_position(
+                        code=pnl.code,
+                        cond=pnl.cond,
+                        direction=pnl.direction,
+                        yd_quantity=pnl.yd_quantity,
+                        trades_sum=trades_sum,
+                    )
+
+                    position = StockPositionInner(
+                        code=pnl.code,
+                        direction=pnl.direction,
+                        quantity=pnl.quantity,
+                        yd_quantity=pnl.yd_quantity,
+                        yd_offset_quantity=yd_offset,
+                        cond=pnl.cond,
+                    )
+                    key = (position.code, position.cond)
+                    self._stock_positions[account_key][key] = position
+
+        elif account_type == AccountType.Future:
+            # Clear existing positions for this account
+            self._futures_positions[account_key] = {}
+
+            for pnl in positions_pnl:
+                if isinstance(pnl, SjFuturePostion):
+                    position = FuturesPosition(
+                        code=pnl.code,
+                        direction=pnl.direction,
+                        quantity=pnl.quantity,
+                    )
+                    self._futures_positions[account_key][position.code] = position
+
+        logger.info(f"Synced positions from API for account {account_key}")
 
     def _load_and_sum_today_trades(
         self, account: Account
@@ -361,6 +381,31 @@ class PositionSync:
 
         return []
 
+    def sync_from_api(self, account: Optional[Account] = None) -> None:
+        """Manually sync positions from API server.
+
+        This method allows you to manually refresh positions from the API,
+        useful when you want to ensure positions are in sync with the server.
+
+        Args:
+            account: Specific account to sync. If None, syncs all accounts.
+
+        Example:
+            >>> # Sync all accounts
+            >>> sync.sync_from_api()
+            >>>
+            >>> # Sync only stock account
+            >>> sync.sync_from_api(account=api.stock_account)
+        """
+        if account is None:
+            # Sync all accounts
+            accounts = self.api.list_accounts()
+            for acc in accounts:
+                self._sync_account_positions(acc)
+        else:
+            # Sync specific account
+            self._sync_account_positions(account)
+
     def list_positions(
         self,
         account: Optional[Account] = None,
@@ -410,13 +455,15 @@ class PositionSync:
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Query API positions, return immediately, then compare and update local in background.
 
+        If deals occur during API query, returns local positions instead to ensure freshness.
+
         Args:
             account: Account to query
             unit: Unit type for query
             timeout: Query timeout in milliseconds
 
         Returns:
-            API positions (converted to our format)
+            API positions or local positions (if deals occurred during query)
         """
         # Determine which account to query
         if account is None:
@@ -427,6 +474,10 @@ class PositionSync:
         else:
             query_account = account
 
+        # Record last deal time before querying API
+        account_key = self._get_account_key(query_account)
+        last_deal_before_query = self._last_deal_time.get(account_key)
+
         # Query API
         try:
             api_positions_pnl = self.api.list_positions(
@@ -436,7 +487,16 @@ class PositionSync:
             logger.error(f"Failed to query API positions: {e}, falling back to local")
             return self._get_local_positions(account)
 
-        # Convert API positions to our format - return this to user immediately
+        # Check if deals occurred during API query
+        last_deal_after_query = self._last_deal_time.get(account_key)
+        if last_deal_after_query != last_deal_before_query:
+            # New deals occurred during query - use fresh local positions
+            logger.info(
+                "Deals occurred during API query, using local positions for freshness"
+            )
+            return self._get_local_positions(account)
+
+        # No new deals - convert API positions to our format
         result = self._convert_api_positions(api_positions_pnl, query_account)
 
         # Get local positions NOW before submitting to thread (to avoid race condition)
@@ -751,13 +811,13 @@ class PositionSync:
         """
         # Handle stock deals
         if state == OrderState.StockDeal:
-            self._update_position(data, is_futures=False)
+            self._update_position(cast(StockDeal, data), is_futures=False)
         # Handle futures deals
         elif state == OrderState.FuturesDeal:
-            self._update_position(data, is_futures=True)
+            self._update_position(cast(FuturesDeal, data), is_futures=True)
 
     def _update_position(
-        self, deal: Union[StockDeal, FuturesDeal, Dict], is_futures: bool = False
+        self, deal: Union[StockDeal, FuturesDeal], is_futures: bool = False
     ) -> None:
         """Update position based on deal event.
 
@@ -768,21 +828,15 @@ class PositionSync:
         # For futures, use full_code to get complete contract code
         # For stocks, use code
         if is_futures:
-            code = deal.get("full_code") or deal.get("code")
+            code: str = deal.get("full_code") or deal["code"]  # type: ignore[assignment]
         else:
-            code = deal.get("code")
+            code = cast(str, deal["code"])
 
-        action_value = deal.get("action")
+        action = self._normalize_direction(cast(str, deal["action"]))
         quantity = deal.get("quantity", 0)
         price = deal.get("price", 0)
-
-        # Get account info from broker_id and account_id fields
-        broker_id = deal.get("broker_id")
-        account_id = deal.get("account_id")
-
-        if not code or not action_value or not broker_id or not account_id:
-            logger.warning(f"Deal missing required fields: {deal}")
-            return
+        broker_id = cast(str, deal["broker_id"])
+        account_id = cast(str, deal["account_id"])
 
         # Create AccountDict from deal data
         account: AccountDict = {
@@ -790,13 +844,11 @@ class PositionSync:
             "account_id": account_id,
         }
 
-        action = self._normalize_direction(action_value)
-
         if is_futures:
             self._update_futures_position(account, code, action, quantity, price)
         else:
             order_cond = self._normalize_cond(
-                deal.get("order_cond", StockOrderCond.Cash)
+                cast(str, deal.get("order_cond", StockOrderCond.Cash))
             )
             self._update_stock_position(
                 account, code, action, quantity, price, order_cond
