@@ -24,6 +24,7 @@ English | [繁體中文](README.zh-TW.md)
 - ✅ **Custom callback support**: Register your own callback while maintaining auto-sync
 - ✅ **Smart sync mode**: Intelligently switches between local calculations and API queries
 - ✅ **Manual sync API**: Force sync with API server for reconciliation
+- ✅ **File logging**: Automatic logging to `sj_sync.log` with rotation and retention
 - ✅ **Multiple trading types**: Cash, margin trading, short selling, day trading settlement
 - ✅ **Futures/options support**: Tracks futures and options positions
 - ✅ **Yesterday's quantity tracking**: Maintains `yd_quantity` for each position
