@@ -22,6 +22,16 @@ from shioaji.position import FuturePosition as SjFuturePostion
 from .models import StockPosition, StockPositionInner, FuturesPosition, AccountDict
 from .types import StockDeal, FuturesDeal
 
+# Configure logger: add file handler for sj_sync logs (INFO and above)
+# Keep default stderr handler so users can control it with LOGURU_* env vars
+logger.add(
+    "sj_sync.log",
+    rotation="1 day",
+    retention="5 days",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+)
+
 # Type alias for order deal callback
 OrderDealCallback = Callable[[OrderState, Union[StockDeal, FuturesDeal, Dict]], None]
 

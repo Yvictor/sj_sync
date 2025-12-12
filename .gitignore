@@ -10,6 +10,8 @@ wheels/
 .venv
 .python-version
 shioaji.log
+sj_sync.log
+sj_sync.*.log
 
 # Testing and coverage
 .pytest_cache/
