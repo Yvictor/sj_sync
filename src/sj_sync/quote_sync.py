@@ -1,7 +1,7 @@
 """Real-time quote snapshot synchronization for Shioaji."""
 
 import time
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Union
 
 from loguru import logger
 
@@ -158,26 +158,20 @@ class QuoteSync:
 
     def snapshots(
         self,
-        codes: Optional[List[str]] = None,
-        contracts: Optional[List[sj.contracts.Contract]] = None,
+        contracts: Optional[List[Union[sj.contracts.Contract, str]]] = None,
     ) -> List[Snapshot]:
         """Get snapshots. Returns live mutable references.
 
         Args:
-            codes: Filter by code strings (preserves order).
-            contracts: Filter by Contract objects (preserves order).
-            None for both = all snapshots.
+            contracts: Filter by Contract objects or code strings (preserves order).
+                       None = all snapshots.
 
         Returns:
             List of Snapshot objects.
         """
-        if codes is None and contracts is None:
+        if contracts is None:
             return list(self._snapshots.values())
-        keys: List[str] = []
-        if contracts:
-            keys.extend(c.code for c in contracts)
-        if codes:
-            keys.extend(codes)
+        keys = [c.code if hasattr(c, "code") else c for c in contracts]
         return [self._snapshots[k] for k in keys if k in self._snapshots]
 
     def set_on_tick_stk_callback(self, callback: Callable) -> None:
