@@ -327,6 +327,24 @@ class TestQuoteSyncSnapshots:
         qs = QuoteSync(mock_quote_api)
         assert qs.snapshots(["9999"]) == []
 
+    def test_snapshots_filtered_by_contracts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330", "2317"])
+        contract = make_contract("2330")
+        result = qs.snapshots(contracts=[contract])
+        assert len(result) == 1
+        assert result[0].code == "2330"
+
+    def test_snapshots_filtered_by_both_contracts_and_codes(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330", "2317"])
+        contract = make_contract("2317")
+        result = qs.snapshots(codes=["2330"], contracts=[contract])
+        assert len(result) == 2
+        # contracts first, then codes
+        assert result[0].code == "2317"
+        assert result[1].code == "2330"
+
     def test_snapshots_returns_live_references(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])

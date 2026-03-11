@@ -156,18 +156,29 @@ class QuoteSync:
                 del self._snapshots[code]
                 del self._contracts[code]
 
-    def snapshots(self, codes: Optional[List[str]] = None) -> List[Snapshot]:
+    def snapshots(
+        self,
+        codes: Optional[List[str]] = None,
+        contracts: Optional[List[sj.contracts.Contract]] = None,
+    ) -> List[Snapshot]:
         """Get snapshots. Returns live mutable references.
 
         Args:
-            codes: Filter by codes (preserves order). None = all.
+            codes: Filter by code strings (preserves order).
+            contracts: Filter by Contract objects (preserves order).
+            None for both = all snapshots.
 
         Returns:
             List of Snapshot objects.
         """
-        if codes is None:
+        if codes is None and contracts is None:
             return list(self._snapshots.values())
-        return [self._snapshots[code] for code in codes if code in self._snapshots]
+        keys: List[str] = []
+        if contracts:
+            keys.extend(c.code for c in contracts)
+        if codes:
+            keys.extend(codes)
+        return [self._snapshots[k] for k in keys if k in self._snapshots]
 
     def set_on_tick_stk_callback(self, callback: Callable) -> None:
         """Register user callback for stock tick events."""
