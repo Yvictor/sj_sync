@@ -192,7 +192,7 @@ qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.Quote
 # Query snapshots locally (zero API calls)
 all_snaps = qs.snapshots()              # all subscribed
 filtered = qs.snapshots(["2330"])       # filtered by codes
-snap = qs.snapshot("2330")              # single, or None
+snap = qs.snapshot("2330")
 
 # Unsubscribe
 qs.unsubscribe(["2317"])                                        # all types

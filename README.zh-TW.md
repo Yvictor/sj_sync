@@ -192,7 +192,7 @@ qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.Quote
 # 本地查詢快照（零 API 呼叫）
 all_snaps = qs.snapshots()              # 所有已訂閱
 filtered = qs.snapshots(["2330"])       # 依代碼篩選
-snap = qs.snapshot("2330")              # 單一，或 None
+snap = qs.snapshot("2330")
 
 # 取消訂閱
 qs.unsubscribe(["2317"])                                        # 所有類型
