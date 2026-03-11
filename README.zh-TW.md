@@ -192,7 +192,6 @@ qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.Quote
 # 本地查詢快照（零 API 呼叫）
 all_snaps = qs.snapshots()              # 所有已訂閱
 filtered = qs.snapshots(["2330"])       # 依代碼篩選
-snap = qs.snapshot("2330")
 
 # 取消訂閱
 qs.unsubscribe(["2317"])                                        # 所有類型
@@ -212,7 +211,7 @@ qs.set_on_bidask_stk_callback(my_bidask_handler)
 **QuoteSync 運作原理：**
 1. `subscribe()` 透過 `api.snapshots()` 取得初始快照，然後訂閱串流
 2. 串流回報（Tick/BidAsk）即時更新本地 `Snapshot` 物件
-3. `snapshots()` / `snapshot()` 回傳這些物件的即時參考 — 零 API 呼叫
+3. `snapshots()` 回傳這些物件的即時參考 — 零 API 呼叫
 4. 差異邏輯：對已訂閱 Tick 的代碼新增 BidAsk，只會訂閱 BidAsk
 
 ## 部位模型
@@ -346,9 +345,6 @@ sync.sync_from_api(account=api.futopt_account)
 
 #### `snapshots(codes=None) -> List[Snapshot]`
 取得所有或篩選後的快照。回傳即時可變參考。
-
-#### `snapshot(code) -> Optional[Snapshot]`
-取得單一快照。未訂閱則回傳 `None`。
 
 #### `set_on_tick_stk_callback(callback)` / `set_on_tick_fop_callback(callback)`
 註冊 Tick 事件的使用者回報（在內部更新後呼叫）。

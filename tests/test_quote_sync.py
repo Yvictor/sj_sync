@@ -165,7 +165,7 @@ class TestQuoteSyncSubscribe:
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
         mock_quote_api.snapshots.assert_called_once()
-        snap = qs.snapshot("2330")
+        snap = qs.snapshots(["2330"])[0]
         assert snap is not None
         assert snap.code == "2330"
 
@@ -187,7 +187,7 @@ class TestQuoteSyncSubscribe:
         qs = QuoteSync(mock_quote_api)
         contract = make_contract("2330")
         qs.subscribe(contracts=[contract])
-        assert qs.snapshot("2330") is not None
+        assert len(qs.snapshots(["2330"])) == 1
 
     def test_subscribe_with_both_codes_and_contracts(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
@@ -239,12 +239,12 @@ class TestQuoteSyncSubscribe:
     def test_resolve_futures_contract(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["TXFH5"])
-        assert qs.snapshot("TXFH5") is not None
+        assert len(qs.snapshots(["TXFH5"])) == 1
 
     def test_resolve_options_contract(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["TXO19500C5"])
-        assert qs.snapshot("TXO19500C5") is not None
+        assert len(qs.snapshots(["TXO19500C5"])) == 1
 
     def test_unresolvable_code_raises(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
@@ -257,7 +257,7 @@ class TestQuoteSyncSubscribe:
         # Should not raise
         qs.subscribe(codes=["2330"])
         # Snapshot should exist (empty) and subscription should proceed
-        assert qs.snapshot("2330") is not None
+        assert len(qs.snapshots(["2330"])) == 1
         mock_quote_api.quote.subscribe.assert_called_once()
 
     def test_subscribe_tick_and_bidask_together(self, mock_quote_api):
@@ -295,7 +295,7 @@ class TestQuoteSyncUnsubscribe:
         qs.unsubscribe(["2330"], quote_type=[QuoteType.BidAsk])
         assert "2330" in qs._subscribed
         assert qs._subscribed["2330"] == {QuoteType.Tick}
-        assert qs.snapshot("2330") is not None
+        assert len(qs.snapshots(["2330"])) == 1
         mock_quote_api.quote.unsubscribe.assert_called_once()
 
     def test_unsubscribe_unknown_code_no_error(self, mock_quote_api):
@@ -336,21 +336,21 @@ class TestQuoteSyncSnapshots:
         result = qs.snapshots(["2330", "MISSING"])
         assert len(result) == 1
 
-    def test_snapshot_single(self, mock_quote_api):
+    def test_snapshots_single_code(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
-        snap = qs.snapshot("2330")
-        assert snap is not None
-        assert isinstance(snap, Snapshot)
+        result = qs.snapshots(["2330"])
+        assert len(result) == 1
+        assert isinstance(result[0], Snapshot)
 
-    def test_snapshot_missing_returns_none(self, mock_quote_api):
+    def test_snapshots_missing_returns_empty(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
-        assert qs.snapshot("9999") is None
+        assert qs.snapshots(["9999"]) == []
 
     def test_snapshots_returns_live_references(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
-        snap1 = qs.snapshot("2330")
+        snap1 = qs.snapshots(["2330"])[0]
         snap2 = qs.snapshots(["2330"])[0]
         assert snap1 is snap2  # same object
 
@@ -364,7 +364,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["2330"])
         tick = make_tick("2330", close=Decimal("610.0"), high=Decimal("615.0"))
         qs._on_tick_stk("TSE", tick)
-        snap = qs.snapshot("2330")
+        snap = qs.snapshots(["2330"])[0]
         assert snap.close == 610.0
         assert snap.high == 615.0
 
@@ -373,7 +373,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["2330"])
         tick = make_tick("2330")
         qs._on_tick_stk("TSE", tick)
-        snap = qs.snapshot("2330")
+        snap = qs.snapshots(["2330"])[0]
         assert snap.close == 600.0
         assert snap.open == 595.0
         assert snap.high == 605.0
@@ -393,7 +393,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["TXFH5"])
         tick = make_tick("TXFH5", close=Decimal("20000.0"))
         qs._on_tick_fop("TAIFEX", tick)
-        snap = qs.snapshot("TXFH5")
+        snap = qs.snapshots(["TXFH5"])[0]
         assert snap.close == 20000.0
 
     def test_tick_ignores_unsubscribed_code(self, mock_quote_api):
@@ -430,7 +430,7 @@ class TestQuoteSyncTickCallbacks:
         tick = make_tick("2330", close=Decimal("999.0"))
         qs._on_tick_stk("TSE", tick)
         # Internal update should still have happened
-        assert qs.snapshot("2330").close == 999.0
+        assert qs.snapshots(["2330"])[0].close == 999.0
 
     def test_malformed_tick_caught(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
@@ -452,7 +452,7 @@ class TestQuoteSyncBidAskCallbacks:
         qs.subscribe(codes=["2330"])
         bidask = make_bidask("2330")
         qs._on_bidask_stk("TSE", bidask)
-        snap = qs.snapshot("2330")
+        snap = qs.snapshots(["2330"])[0]
         assert snap.buy_price == 599.0
         assert snap.buy_volume == 100
         assert snap.sell_price == 600.0
@@ -463,7 +463,7 @@ class TestQuoteSyncBidAskCallbacks:
         qs.subscribe(codes=["TXFH5"])
         bidask = make_bidask("TXFH5")
         qs._on_bidask_fop("TAIFEX", bidask)
-        snap = qs.snapshot("TXFH5")
+        snap = qs.snapshots(["TXFH5"])[0]
         assert snap.buy_price == 599.0
         assert snap.sell_price == 600.0
 
@@ -505,4 +505,4 @@ class TestQuoteSyncBidAskCallbacks:
         bidask = make_bidask("2330")
         qs._on_bidask_stk("TSE", bidask)
         # Internal update should still have worked
-        assert qs.snapshot("2330").buy_price == 599.0
+        assert qs.snapshots(["2330"])[0].buy_price == 599.0

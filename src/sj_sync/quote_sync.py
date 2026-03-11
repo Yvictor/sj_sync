@@ -34,7 +34,7 @@ class QuoteSync:
     Usage:
         qs = QuoteSync(api)
         qs.subscribe(["2330", "2317"])
-        snap = qs.snapshot("2330")  # returns Snapshot or None
+        snaps = qs.snapshots(["2330"])
 
     Note: One QuoteSync per api instance — creating a second will overwrite
     the first's callbacks.
@@ -170,10 +170,6 @@ class QuoteSync:
         return [
             self._snapshots[code] for code in codes if code in self._snapshots
         ]
-
-    def snapshot(self, code: str) -> Optional[Snapshot]:
-        """Get a single snapshot. Returns None if not subscribed."""
-        return self._snapshots.get(code)
 
     def set_on_tick_stk_callback(self, callback: Callable) -> None:
         """Register user callback for stock tick events."""

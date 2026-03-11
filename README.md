@@ -192,7 +192,6 @@ qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.Quote
 # Query snapshots locally (zero API calls)
 all_snaps = qs.snapshots()              # all subscribed
 filtered = qs.snapshots(["2330"])       # filtered by codes
-snap = qs.snapshot("2330")
 
 # Unsubscribe
 qs.unsubscribe(["2317"])                                        # all types
@@ -212,7 +211,7 @@ qs.set_on_bidask_stk_callback(my_bidask_handler)
 **How QuoteSync Works:**
 1. `subscribe()` fetches initial snapshots via `api.snapshots()`, then subscribes to streaming
 2. Streaming callbacks (Tick/BidAsk) update local `Snapshot` objects in-place
-3. `snapshots()` / `snapshot()` return live references to these objects — zero API calls
+3. `snapshots()` returns live references to these objects — zero API calls
 4. Delta logic: adding BidAsk to an already-Tick-subscribed code only subscribes BidAsk
 
 ## Position Models
@@ -346,9 +345,6 @@ Unsubscribe from streaming quotes. `quote_type=None` unsubscribes all types.
 
 #### `snapshots(codes=None) -> List[Snapshot]`
 Get all or filtered snapshots. Returns live mutable references.
-
-#### `snapshot(code) -> Optional[Snapshot]`
-Get a single snapshot. Returns `None` if not subscribed.
 
 #### `set_on_tick_stk_callback(callback)` / `set_on_tick_fop_callback(callback)`
 Register user callback for tick events (called after internal update).
