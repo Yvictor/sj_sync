@@ -158,13 +158,13 @@ class QuoteSync:
 
     def snapshots(
         self,
-        contracts: Optional[List[Union[sj.contracts.Contract, str]]] = None,
+        contracts: Optional[Union[List[sj.contracts.Contract], List[str]]] = None,
     ) -> List[Snapshot]:
         """Get snapshots. Returns live mutable references.
 
         Args:
-            contracts: Filter by Contract objects or code strings (preserves order).
-                       None = all snapshots.
+            contracts: List of Contract objects or list of code strings
+                       (preserves order). None = all snapshots.
 
         Returns:
             List of Snapshot objects.

@@ -335,11 +335,12 @@ class TestQuoteSyncSnapshots:
         assert len(result) == 1
         assert result[0].code == "2330"
 
-    def test_snapshots_mixed_contracts_and_codes(self, mock_quote_api):
+    def test_snapshots_filtered_by_contracts_preserves_order(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330", "2317"])
-        contract = make_contract("2317")
-        result = qs.snapshots([contract, "2330"])
+        c1 = make_contract("2317")
+        c2 = make_contract("2330")
+        result = qs.snapshots([c1, c2])
         assert len(result) == 2
         assert result[0].code == "2317"
         assert result[1].code == "2330"
