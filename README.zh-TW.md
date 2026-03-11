@@ -208,6 +208,15 @@ qs.set_on_tick_stk_callback(on_tick)
 qs.set_on_bidask_stk_callback(my_bidask_handler)
 ```
 
+**不同訂閱類型更新的 Snapshot 欄位：**
+
+| 訂閱類型 | 更新欄位 |
+|---------|---------|
+| `Tick` | `close`, `open`, `high`, `low`, `volume`, `total_volume`, `amount`, `total_amount`, `tick_type`, `average_price`, `change_price`, `change_rate`, `change_type` |
+| `BidAsk` | `buy_price`, `buy_volume`, `sell_price`, `sell_volume` |
+
+只需要價量資料時訂閱 `Tick` 即可。若還需要即時最佳買賣價，再加訂 `BidAsk`。
+
 **QuoteSync 運作原理：**
 1. `subscribe()` 透過 `api.snapshots()` 取得初始快照，然後訂閱串流
 2. 串流回報（Tick/BidAsk）即時更新本地 `Snapshot` 物件

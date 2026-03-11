@@ -208,6 +208,15 @@ qs.set_on_tick_stk_callback(on_tick)
 qs.set_on_bidask_stk_callback(my_bidask_handler)
 ```
 
+**Snapshot Fields Updated by Subscription Type:**
+
+| Subscription | Fields Updated |
+|-------------|---------------|
+| `Tick` | `close`, `open`, `high`, `low`, `volume`, `total_volume`, `amount`, `total_amount`, `tick_type`, `average_price`, `change_price`, `change_rate`, `change_type` |
+| `BidAsk` | `buy_price`, `buy_volume`, `sell_price`, `sell_volume` |
+
+Subscribe `Tick` only if you need price/volume. Add `BidAsk` if you also need real-time best bid/ask.
+
 **How QuoteSync Works:**
 1. `subscribe()` fetches initial snapshots via `api.snapshots()`, then subscribes to streaming
 2. Streaming callbacks (Tick/BidAsk) update local `Snapshot` objects in-place
