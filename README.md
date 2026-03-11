@@ -32,6 +32,7 @@ English | [繁體中文](README.zh-TW.md)
 - ✅ **Automatic cleanup**: Removes positions when quantity reaches zero
 - ✅ **Multi-account support**: Properly isolates positions across different accounts
 - ✅ **Pydantic models**: Type-safe position objects
+- ✅ **QuoteSync**: Real-time quote snapshots via streaming (Tick/BidAsk)
 
 ## Installation
 
@@ -168,6 +169,60 @@ sync.sync_from_api(account=api.stock_account)
 - ✅ **Verification**: Double-check local positions against server
 - 🎯 **Selective sync**: Sync specific accounts or all accounts
 
+### QuoteSync
+
+Real-time quote snapshots via streaming, without repeatedly calling `api.snapshots()`:
+
+```python
+import shioaji as sj
+from sj_sync import QuoteSync
+
+api = sj.Shioaji()
+api.login("YOUR_API_KEY", "YOUR_SECRET_KEY")
+
+# Create QuoteSync (registers streaming callbacks)
+qs = QuoteSync(api)
+
+# Subscribe to Tick data (default)
+qs.subscribe(["2330", "2317"])
+
+# Subscribe to Tick + BidAsk for real-time bid/ask prices
+qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk])
+
+# Query snapshots locally (zero API calls)
+all_snaps = qs.snapshots()              # all subscribed
+filtered = qs.snapshots(["2330"])       # filtered by codes
+
+# Unsubscribe
+qs.unsubscribe(["2317"])                                        # all types
+qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])  # partial
+```
+
+**User Callbacks:**
+```python
+# Chain your own callback after internal snapshot update
+def on_tick(exchange, tick):
+    print(f"{tick.code}: {tick.close}")
+
+qs.set_on_tick_stk_callback(on_tick)
+qs.set_on_bidask_stk_callback(my_bidask_handler)
+```
+
+**Snapshot Fields Updated by Subscription Type:**
+
+| Subscription | Fields Updated |
+|-------------|---------------|
+| `Tick` | `close`, `open`, `high`, `low`, `volume`, `total_volume`, `amount`, `total_amount`, `tick_type`, `average_price`, `change_price`, `change_rate`, `change_type` |
+| `BidAsk` | `buy_price`, `buy_volume`, `sell_price`, `sell_volume` |
+
+Subscribe `Tick` only if you need price/volume. Add `BidAsk` if you also need real-time best bid/ask.
+
+**How QuoteSync Works:**
+1. `subscribe()` fetches initial snapshots via `api.snapshots()`, then subscribes to streaming
+2. Streaming callbacks (Tick/BidAsk) update local `Snapshot` objects in-place
+3. `snapshots()` returns live references to these objects — zero API calls
+4. Delta logic: adding BidAsk to an already-Tick-subscribed code only subscribes BidAsk
+
 ## Position Models
 
 ### StockPosition
@@ -280,6 +335,31 @@ Callback for order deal events. Automatically registered on init.
 Handles:
 - `OrderState.StockDeal`: Stock deal events
 - `OrderState.FuturesDeal`: Futures/options deal events
+
+### QuoteSync
+
+#### `__init__(api: sj.Shioaji)`
+Initialize with Shioaji API instance. Registers streaming callbacks.
+
+#### `subscribe(codes=None, contracts=None, quote_type=None)`
+Subscribe to streaming quotes. Fetches initial snapshots, then subscribes to streaming.
+
+**Args:**
+- `codes`: List of stock/futures/options codes
+- `contracts`: List of Contract objects
+- `quote_type`: List of `QuoteType` (default: `[QuoteType.Tick]`)
+
+#### `unsubscribe(codes, quote_type=None)`
+Unsubscribe from streaming quotes. `quote_type=None` unsubscribes all types.
+
+#### `snapshots(codes=None) -> List[Snapshot]`
+Get all or filtered snapshots. Returns live mutable references.
+
+#### `set_on_tick_stk_callback(callback)` / `set_on_tick_fop_callback(callback)`
+Register user callback for tick events (called after internal update).
+
+#### `set_on_bidask_stk_callback(callback)` / `set_on_bidask_fop_callback(callback)`
+Register user callback for bid/ask events (called after internal update).
 
 ## How It Works
 
