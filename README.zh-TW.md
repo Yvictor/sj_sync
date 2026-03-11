@@ -32,6 +32,7 @@ Shioaji 的即時部位同步工具。
 - ✅ **自動清理**：數量歸零時自動移除部位
 - ✅ **多帳戶支援**：正確隔離不同帳戶的部位
 - ✅ **Pydantic 模型**：型別安全的部位物件
+- ✅ **QuoteSync**：透過串流（Tick/BidAsk）即時報價快照
 
 ## 安裝
 
@@ -168,6 +169,52 @@ sync.sync_from_api(account=api.stock_account)
 - ✅ **驗證**：對照本地部位與伺服器
 - 🎯 **選擇性同步**：同步特定帳戶或所有帳戶
 
+### QuoteSync
+
+透過串流即時取得報價快照，無需重複呼叫 `api.snapshots()`：
+
+```python
+import shioaji as sj
+from sj_sync import QuoteSync
+
+api = sj.Shioaji()
+api.login("YOUR_API_KEY", "YOUR_SECRET_KEY")
+
+# 建立 QuoteSync（註冊串流回報）
+qs = QuoteSync(api)
+
+# 訂閱 Tick 資料（預設）
+qs.subscribe(["2330", "2317"])
+
+# 訂閱 Tick + BidAsk 取得即時買賣價
+qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk])
+
+# 本地查詢快照（零 API 呼叫）
+all_snaps = qs.snapshots()              # 所有已訂閱
+filtered = qs.snapshots(["2330"])       # 依代碼篩選
+snap = qs.snapshot("2330")              # 單一，或 None
+
+# 取消訂閱
+qs.unsubscribe(["2317"])                                        # 所有類型
+qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])  # 部分取消
+```
+
+**使用者回報：**
+```python
+# 在內部快照更新後串接自己的回報函式
+def on_tick(exchange, tick):
+    print(f"{tick.code}: {tick.close}")
+
+qs.set_on_tick_stk_callback(on_tick)
+qs.set_on_bidask_stk_callback(my_bidask_handler)
+```
+
+**QuoteSync 運作原理：**
+1. `subscribe()` 透過 `api.snapshots()` 取得初始快照，然後訂閱串流
+2. 串流回報（Tick/BidAsk）即時更新本地 `Snapshot` 物件
+3. `snapshots()` / `snapshot()` 回傳這些物件的即時參考 — 零 API 呼叫
+4. 差異邏輯：對已訂閱 Tick 的代碼新增 BidAsk，只會訂閱 BidAsk
+
 ## 部位模型
 
 ### StockPosition（股票部位）
@@ -280,6 +327,34 @@ sync.sync_from_api(account=api.futopt_account)
 處理：
 - `OrderState.StockDeal`：股票成交事件
 - `OrderState.FuturesDeal`：期貨/選擇權成交事件
+
+### QuoteSync
+
+#### `__init__(api: sj.Shioaji)`
+使用 Shioaji API 實例初始化，註冊串流回報。
+
+#### `subscribe(codes=None, contracts=None, quote_type=None)`
+訂閱串流報價。取得初始快照後訂閱串流。
+
+**參數：**
+- `codes`：股票/期貨/選擇權代碼列表
+- `contracts`：Contract 物件列表
+- `quote_type`：`QuoteType` 列表（預設：`[QuoteType.Tick]`）
+
+#### `unsubscribe(codes, quote_type=None)`
+取消訂閱串流報價。`quote_type=None` 取消所有類型。
+
+#### `snapshots(codes=None) -> List[Snapshot]`
+取得所有或篩選後的快照。回傳即時可變參考。
+
+#### `snapshot(code) -> Optional[Snapshot]`
+取得單一快照。未訂閱則回傳 `None`。
+
+#### `set_on_tick_stk_callback(callback)` / `set_on_tick_fop_callback(callback)`
+註冊 Tick 事件的使用者回報（在內部更新後呼叫）。
+
+#### `set_on_bidask_stk_callback(callback)` / `set_on_bidask_fop_callback(callback)`
+註冊買賣價事件的使用者回報（在內部更新後呼叫）。
 
 ## 運作原理
 
