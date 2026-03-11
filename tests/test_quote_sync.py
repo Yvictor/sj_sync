@@ -81,30 +81,18 @@ def mock_quote_api():
 
     api.Contracts.Stocks = Mock()
     api.Contracts.Stocks.get = Mock(side_effect=lambda c: stocks_dict.get(c))
-    api.Contracts.Stocks.__contains__ = Mock(
-        side_effect=lambda c: c in stocks_dict
-    )
-    api.Contracts.Stocks.__getitem__ = Mock(
-        side_effect=lambda c: stocks_dict[c]
-    )
+    api.Contracts.Stocks.__contains__ = Mock(side_effect=lambda c: c in stocks_dict)
+    api.Contracts.Stocks.__getitem__ = Mock(side_effect=lambda c: stocks_dict[c])
 
     api.Contracts.Futures = Mock()
     api.Contracts.Futures.get = Mock(side_effect=lambda c: futures_dict.get(c))
-    api.Contracts.Futures.__contains__ = Mock(
-        side_effect=lambda c: c in futures_dict
-    )
-    api.Contracts.Futures.__getitem__ = Mock(
-        side_effect=lambda c: futures_dict[c]
-    )
+    api.Contracts.Futures.__contains__ = Mock(side_effect=lambda c: c in futures_dict)
+    api.Contracts.Futures.__getitem__ = Mock(side_effect=lambda c: futures_dict[c])
 
     api.Contracts.Options = Mock()
     api.Contracts.Options.get = Mock(side_effect=lambda c: options_dict.get(c))
-    api.Contracts.Options.__contains__ = Mock(
-        side_effect=lambda c: c in options_dict
-    )
-    api.Contracts.Options.__getitem__ = Mock(
-        side_effect=lambda c: options_dict[c]
-    )
+    api.Contracts.Options.__contains__ = Mock(side_effect=lambda c: c in options_dict)
+    api.Contracts.Options.__getitem__ = Mock(side_effect=lambda c: options_dict[c])
 
     # Default: api.snapshots returns real Snapshot objects
     def mock_snapshots(contracts):
@@ -193,9 +181,7 @@ class TestQuoteSyncSubscribe:
         qs = QuoteSync(mock_quote_api)
         contract = make_contract("CUSTOM")
         # Need to make api.snapshots handle this too
-        mock_quote_api.snapshots.side_effect = lambda cs: [
-            Snapshot() for _ in cs
-        ]
+        mock_quote_api.snapshots.side_effect = lambda cs: [Snapshot() for _ in cs]
         qs.subscribe(codes=["2330"], contracts=[contract])
         assert mock_quote_api.quote.subscribe.call_count == 2
 
@@ -204,16 +190,12 @@ class TestQuoteSyncSubscribe:
         with pytest.raises(ValueError, match="Must provide either"):
             qs.subscribe()
 
-    def test_skip_existing_codes_no_duplicate_snapshot_fetch(
-        self, mock_quote_api
-    ):
+    def test_skip_existing_codes_no_duplicate_snapshot_fetch(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
         mock_quote_api.snapshots.reset_mock()
         # Subscribe again with same code + new type
-        qs.subscribe(
-            codes=["2330"], quote_type=[QuoteType.BidAsk]
-        )
+        qs.subscribe(codes=["2330"], quote_type=[QuoteType.BidAsk])
         # Should NOT call api.snapshots again for existing code
         mock_quote_api.snapshots.assert_not_called()
 
@@ -227,9 +209,7 @@ class TestQuoteSyncSubscribe:
         call_args = mock_quote_api.quote.subscribe.call_args
         assert call_args[1]["quote_type"] == QuoteType.BidAsk
 
-    def test_duplicate_subscribe_same_type_no_extra_call(
-        self, mock_quote_api
-    ):
+    def test_duplicate_subscribe_same_type_no_extra_call(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"], quote_type=[QuoteType.Tick])
         mock_quote_api.quote.subscribe.reset_mock()
@@ -420,9 +400,7 @@ class TestQuoteSyncTickCallbacks:
         qs._on_tick_fop("TAIFEX", tick)
         user_cb.assert_called_once_with("TAIFEX", tick)
 
-    def test_user_callback_exception_logged_internal_still_works(
-        self, mock_quote_api
-    ):
+    def test_user_callback_exception_logged_internal_still_works(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
         user_cb = Mock(side_effect=Exception("user error"))

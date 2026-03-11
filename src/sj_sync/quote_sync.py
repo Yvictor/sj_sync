@@ -167,9 +167,7 @@ class QuoteSync:
         """
         if codes is None:
             return list(self._snapshots.values())
-        return [
-            self._snapshots[code] for code in codes if code in self._snapshots
-        ]
+        return [self._snapshots[code] for code in codes if code in self._snapshots]
 
     def set_on_tick_stk_callback(self, callback: Callable) -> None:
         """Register user callback for stock tick events."""
@@ -296,7 +294,13 @@ class QuoteSync:
             self.api.Contracts.Futures,
             self.api.Contracts.Options,
         ]:
-            contract = collection.get(code) if hasattr(collection, "get") else collection[code] if code in collection else None
+            contract = (
+                collection.get(code)
+                if hasattr(collection, "get")
+                else collection[code]
+                if code in collection
+                else None
+            )
             if contract is not None:
                 return contract
         raise ValueError(f"Cannot resolve contract for code: {code}")
