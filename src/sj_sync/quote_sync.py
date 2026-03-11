@@ -294,15 +294,12 @@ class QuoteSync:
             self.api.Contracts.Futures,
             self.api.Contracts.Options,
         ]:
-            contract = (
-                collection.get(code)
-                if hasattr(collection, "get")
-                else collection[code]
-                if code in collection
-                else None
-            )
-            if contract is not None:
-                return contract
+            try:
+                contract = collection[code]
+                if contract is not None:
+                    return contract
+            except (KeyError, IndexError, AttributeError):
+                continue
         raise ValueError(f"Cannot resolve contract for code: {code}")
 
     @staticmethod
