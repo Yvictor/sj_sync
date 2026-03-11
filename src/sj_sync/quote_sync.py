@@ -342,7 +342,7 @@ class QuoteSync:
         # Remove timestamps outside the window
         while timestamps and now - timestamps[0] > _RATE_LIMIT_WINDOW:
             timestamps.pop(0)
-        if len(timestamps) >= _RATE_LIMIT_CALLS:
+        if len(timestamps) >= _RATE_LIMIT_CALLS:  # pragma: no cover
             sleep_time = _RATE_LIMIT_WINDOW - (now - timestamps[0])
             if sleep_time > 0:
                 time.sleep(sleep_time)

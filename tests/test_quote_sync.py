@@ -428,15 +428,30 @@ class TestQuoteSyncTickCallbacks:
         # Internal update should still have happened
         assert qs.snapshots(["2330"])[0].close == 999.0
 
-    def test_malformed_tick_caught(self, mock_quote_api):
+    def test_malformed_tick_stk_caught(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
         tick = Mock()
         tick.code = "2330"
-        # Missing attributes will cause AttributeError
         del tick.close
-        # Should not raise
         qs._on_tick_stk("TSE", tick)
+
+    def test_malformed_tick_fop_caught(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        tick = Mock()
+        tick.code = "TXFH5"
+        del tick.close
+        qs._on_tick_fop("TAIFEX", tick)
+
+    def test_tick_fop_user_callback_exception_logged(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        user_cb = Mock(side_effect=Exception("user error"))
+        qs.set_on_tick_fop_callback(user_cb)
+        tick = make_tick("TXFH5")
+        qs._on_tick_fop("TAIFEX", tick)
+        assert qs.snapshots(["TXFH5"])[0].close == 600.0
 
 
 # -- TestQuoteSyncBidAskCallbacks --
@@ -493,12 +508,36 @@ class TestQuoteSyncBidAskCallbacks:
         qs._on_bidask_fop("TAIFEX", bidask)
         user_cb.assert_called_once_with("TAIFEX", bidask)
 
-    def test_bidask_user_callback_exception_logged(self, mock_quote_api):
+    def test_bidask_stk_user_callback_exception_logged(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
         user_cb = Mock(side_effect=Exception("user error"))
         qs.set_on_bidask_stk_callback(user_cb)
         bidask = make_bidask("2330")
         qs._on_bidask_stk("TSE", bidask)
-        # Internal update should still have worked
         assert qs.snapshots(["2330"])[0].buy_price == 599.0
+
+    def test_bidask_fop_user_callback_exception_logged(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        user_cb = Mock(side_effect=Exception("user error"))
+        qs.set_on_bidask_fop_callback(user_cb)
+        bidask = make_bidask("TXFH5")
+        qs._on_bidask_fop("TAIFEX", bidask)
+        assert qs.snapshots(["TXFH5"])[0].buy_price == 599.0
+
+    def test_malformed_bidask_stk_caught(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        bidask = Mock()
+        bidask.code = "2330"
+        del bidask.bid_price
+        qs._on_bidask_stk("TSE", bidask)
+
+    def test_malformed_bidask_fop_caught(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        bidask = Mock()
+        bidask.code = "TXFH5"
+        del bidask.bid_price
+        qs._on_bidask_fop("TAIFEX", bidask)
