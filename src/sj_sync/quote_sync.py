@@ -17,6 +17,15 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
 )
 
+_TICK_TYPE_MAP = {0: TickType.No, 1: TickType.Buy, 2: TickType.Sell}
+_CHANGE_TYPE_MAP = {
+    1: ChangeType.LimitUp,
+    2: ChangeType.Up,
+    3: ChangeType.Unchanged,
+    4: ChangeType.Down,
+    5: ChangeType.LimitDown,
+}
+
 # Rate limit: 50 subscribe/unsubscribe calls per 5 seconds
 _RATE_LIMIT_CALLS = 50
 _RATE_LIMIT_WINDOW = 5.0
@@ -205,11 +214,11 @@ class QuoteSync:
             snap.total_volume = tick.total_volume
             snap.amount = int(tick.amount)
             snap.total_amount = int(tick.total_amount)
-            snap.tick_type = tick.tick_type
+            snap.tick_type = _TICK_TYPE_MAP.get(tick.tick_type, tick.tick_type)
             snap.average_price = float(tick.avg_price)
             snap.change_price = float(tick.price_chg)
             snap.change_rate = float(tick.pct_chg)
-            snap.change_type = tick.chg_type
+            snap.change_type = _CHANGE_TYPE_MAP.get(tick.chg_type, tick.chg_type)
         except Exception as e:
             logger.error(
                 f"Error in tick_stk callback for {getattr(tick, 'code', '?')}: {e}"
@@ -233,11 +242,11 @@ class QuoteSync:
             snap.total_volume = tick.total_volume
             snap.amount = int(tick.amount)
             snap.total_amount = int(tick.total_amount)
-            snap.tick_type = tick.tick_type
+            snap.tick_type = _TICK_TYPE_MAP.get(tick.tick_type, tick.tick_type)
             snap.average_price = float(tick.avg_price)
             snap.change_price = float(tick.price_chg)
             snap.change_rate = float(tick.pct_chg)
-            snap.change_type = tick.chg_type
+            snap.change_type = _CHANGE_TYPE_MAP.get(tick.chg_type, tick.chg_type)
         except Exception as e:
             logger.error(
                 f"Error in tick_fop callback for {getattr(tick, 'code', '?')}: {e}"

@@ -4,7 +4,7 @@ from decimal import Decimal
 from unittest.mock import Mock
 
 import pytest
-from shioaji.constant import QuoteType
+from shioaji.constant import ChangeType, QuoteType, TickType
 from shioaji.data import Snapshot
 
 from sj_sync.quote_sync import QuoteSync
@@ -380,11 +380,11 @@ class TestQuoteSyncTickCallbacks:
         assert snap.total_volume == 5000
         assert snap.amount == 6000000
         assert snap.total_amount == 3000000000
-        assert snap.tick_type == 1
+        assert snap.tick_type == TickType.Buy
         assert snap.average_price == 598.5
         assert snap.change_price == 5.0
         assert snap.change_rate == 0.84
-        assert snap.change_type == 2
+        assert snap.change_type == ChangeType.Up
 
     def test_tick_fop_updates_snapshot(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
