@@ -35,6 +35,7 @@ def make_tick(code: str, **overrides) -> Mock:
         price_chg=Decimal("5.0"),
         pct_chg=Decimal("0.84"),
         chg_type=2,
+        simtrade=0,
     )
     defaults.update(overrides)
     tick = Mock()
@@ -433,6 +434,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["2330"])
         tick = Mock()
         tick.code = "2330"
+        tick.simtrade = 0
         del tick.close
         qs._on_tick_stk("TSE", tick)
 
@@ -441,6 +443,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["TXFH5"])
         tick = Mock()
         tick.code = "TXFH5"
+        tick.simtrade = 0
         del tick.close
         qs._on_tick_fop("TAIFEX", tick)
 
@@ -452,6 +455,79 @@ class TestQuoteSyncTickCallbacks:
         tick = make_tick("TXFH5")
         qs._on_tick_fop("TAIFEX", tick)
         assert qs.snapshots(["TXFH5"])[0].close == 600.0
+
+    def test_tick_stk_simtrade_skipped(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        original_snap = qs.snapshots(["2330"])[0]
+        original_close = original_snap.close
+        original_change_rate = original_snap.change_rate
+        tick = make_tick(
+            "2330", simtrade=1, close=Decimal("999.0"), pct_chg=Decimal("9.99")
+        )
+        qs._on_tick_stk("TSE", tick)
+        snap = qs.snapshots(["2330"])[0]
+        assert snap.close == original_close
+        assert snap.change_rate == original_change_rate
+
+    def test_tick_fop_simtrade_skipped(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        original_snap = qs.snapshots(["TXFH5"])[0]
+        original_close = original_snap.close
+        tick = make_tick("TXFH5", simtrade=1, close=Decimal("99999.0"))
+        qs._on_tick_fop("TAIFEX", tick)
+        snap = qs.snapshots(["TXFH5"])[0]
+        assert snap.close == original_close
+
+    def test_tick_stk_simtrade_user_callback_still_called(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        user_cb = Mock()
+        qs.set_on_tick_stk_callback(user_cb)
+        tick = make_tick("2330", simtrade=1)
+        qs._on_tick_stk("TSE", tick)
+        user_cb.assert_called_once_with("TSE", tick)
+
+    def test_tick_fop_simtrade_user_callback_still_called(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        user_cb = Mock()
+        qs.set_on_tick_fop_callback(user_cb)
+        tick = make_tick("TXFH5", simtrade=1)
+        qs._on_tick_fop("TAIFEX", tick)
+        user_cb.assert_called_once_with("TAIFEX", tick)
+
+    def test_tick_stk_simtrade_user_callback_exception_logged(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        user_cb = Mock(side_effect=Exception("user error"))
+        qs.set_on_tick_stk_callback(user_cb)
+        tick = make_tick("2330", simtrade=1)
+        qs._on_tick_stk("TSE", tick)
+        # Should not propagate
+        user_cb.assert_called_once_with("TSE", tick)
+
+    def test_tick_fop_simtrade_user_callback_exception_logged(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        user_cb = Mock(side_effect=Exception("user error"))
+        qs.set_on_tick_fop_callback(user_cb)
+        tick = make_tick("TXFH5", simtrade=1)
+        qs._on_tick_fop("TAIFEX", tick)
+        # Should not propagate
+        user_cb.assert_called_once_with("TAIFEX", tick)
+
+    def test_tick_stk_non_simtrade_updates_normally(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        tick = make_tick(
+            "2330", simtrade=0, close=Decimal("650.0"), pct_chg=Decimal("1.5")
+        )
+        qs._on_tick_stk("TSE", tick)
+        snap = qs.snapshots(["2330"])[0]
+        assert snap.close == 650.0
+        assert snap.change_rate == 1.5
 
 
 # -- TestQuoteSyncBidAskCallbacks --

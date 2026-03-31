@@ -202,6 +202,13 @@ class QuoteSync:
     # -- Internal callbacks --
 
     def _on_tick_stk(self, exchange, tick) -> None:
+        if tick.simtrade:
+            try:
+                if self._user_tick_stk_callback:
+                    self._user_tick_stk_callback(exchange, tick)
+            except Exception as e:
+                logger.error(f"Error in user tick_stk callback: {e}")
+            return
         try:
             if tick.code not in self._snapshots:
                 return
@@ -230,6 +237,13 @@ class QuoteSync:
             logger.error(f"Error in user tick_stk callback: {e}")
 
     def _on_tick_fop(self, exchange, tick) -> None:
+        if tick.simtrade:
+            try:
+                if self._user_tick_fop_callback:
+                    self._user_tick_fop_callback(exchange, tick)
+            except Exception as e:
+                logger.error(f"Error in user tick_fop callback: {e}")
+            return
         try:
             if tick.code not in self._snapshots:
                 return
