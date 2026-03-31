@@ -503,8 +503,7 @@ class TestQuoteSyncTickCallbacks:
         qs.set_on_tick_stk_callback(user_cb)
         tick = make_tick("2330", simtrade=1)
         qs._on_tick_stk("TSE", tick)
-        # Should not propagate; snapshot unchanged
-        snap = qs.snapshots(["2330"])[0]
+        # Should not propagate
         user_cb.assert_called_once_with("TSE", tick)
 
     def test_tick_stk_non_simtrade_updates_normally(self, mock_quote_api):
