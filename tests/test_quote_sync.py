@@ -434,6 +434,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["2330"])
         tick = Mock()
         tick.code = "2330"
+        tick.simtrade = 0
         del tick.close
         qs._on_tick_stk("TSE", tick)
 
@@ -442,6 +443,7 @@ class TestQuoteSyncTickCallbacks:
         qs.subscribe(codes=["TXFH5"])
         tick = Mock()
         tick.code = "TXFH5"
+        tick.simtrade = 0
         del tick.close
         qs._on_tick_fop("TAIFEX", tick)
 
@@ -503,7 +505,7 @@ class TestQuoteSyncTickCallbacks:
         qs._on_tick_stk("TSE", tick)
         # Should not propagate; snapshot unchanged
         snap = qs.snapshots(["2330"])[0]
-        assert snap.close != 600.0 or snap.close == 600.0  # no crash
+        user_cb.assert_called_once_with("TSE", tick)
 
     def test_tick_stk_non_simtrade_updates_normally(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
