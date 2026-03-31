@@ -462,7 +462,9 @@ class TestQuoteSyncTickCallbacks:
         original_snap = qs.snapshots(["2330"])[0]
         original_close = original_snap.close
         original_change_rate = original_snap.change_rate
-        tick = make_tick("2330", simtrade=1, close=Decimal("999.0"), pct_chg=Decimal("9.99"))
+        tick = make_tick(
+            "2330", simtrade=1, close=Decimal("999.0"), pct_chg=Decimal("9.99")
+        )
         qs._on_tick_stk("TSE", tick)
         snap = qs.snapshots(["2330"])[0]
         assert snap.close == original_close
@@ -509,7 +511,9 @@ class TestQuoteSyncTickCallbacks:
     def test_tick_stk_non_simtrade_updates_normally(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
-        tick = make_tick("2330", simtrade=0, close=Decimal("650.0"), pct_chg=Decimal("1.5"))
+        tick = make_tick(
+            "2330", simtrade=0, close=Decimal("650.0"), pct_chg=Decimal("1.5")
+        )
         qs._on_tick_stk("TSE", tick)
         snap = qs.snapshots(["2330"])[0]
         assert snap.close == 650.0
