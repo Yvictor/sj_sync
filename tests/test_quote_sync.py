@@ -508,6 +508,16 @@ class TestQuoteSyncTickCallbacks:
         # Should not propagate
         user_cb.assert_called_once_with("TSE", tick)
 
+    def test_tick_fop_simtrade_user_callback_exception_logged(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        user_cb = Mock(side_effect=Exception("user error"))
+        qs.set_on_tick_fop_callback(user_cb)
+        tick = make_tick("TXFH5", simtrade=1)
+        qs._on_tick_fop("TAIFEX", tick)
+        # Should not propagate
+        user_cb.assert_called_once_with("TAIFEX", tick)
+
     def test_tick_stk_non_simtrade_updates_normally(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
