@@ -866,7 +866,7 @@ class PositionSync:
 
     def _is_day_trading_offset(
         self, code: str, account_key: str, action: Action, order_cond: StockOrderCond
-    ) -> tuple[bool, StockOrderCond | None]:
+    ) -> Tuple[bool, Optional[StockOrderCond]]:
         """Check if this is a day trading offset transaction.
 
         Day trading rules:
