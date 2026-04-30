@@ -229,12 +229,21 @@ Subscribe `Tick` only if you need price/volume. Add `BidAsk` if you also need re
 
 ```python
 class StockPosition(BaseModel):
-    code: str           # Stock code (e.g., "2330")
-    direction: Action   # Action.Buy or Action.Sell
-    quantity: int       # Current position quantity
-    yd_quantity: int    # Yesterday's position quantity
-    cond: StockOrderCond  # Cash, MarginTrading, or ShortSelling
+    code: str                # Stock code (e.g., "2330")
+    direction: Action        # Action.Buy or Action.Sell
+    quantity: int            # Current position quantity
+    yd_quantity: int         # Yesterday's position quantity (fixed reference)
+    yd_offset_quantity: int  # Amount of yd_quantity already offset by today's
+                             # opposite-direction trades (accumulates intraday)
+    cond: StockOrderCond     # Cash, MarginTrading, or ShortSelling
+
+    # Computed (read-only, included in model_dump() / JSON):
+    yd_remaining_quantity: int  # = yd_quantity - yd_offset_quantity
 ```
+
+`yd_remaining_quantity` is a Pydantic computed field; passing it to the
+constructor is silently ignored. It does **not** participate in equality —
+only the real fields do.
 
 ### FuturesPosition
 
@@ -390,10 +399,12 @@ Register user callback for bid/ask events (called after internal update).
   - Auto-corrects any inconsistencies found
 
 ### 4. Position Storage
-- Stock positions: `{account_key: {(code, cond): StockPositionInner}}`
+- Stock positions: `{account_key: {(code, cond): StockPosition}}`
 - Futures positions: `{account_key: {code: FuturesPosition}}`
 - Account key = `broker_id + account_id`
-- Internal model tracks `yd_offset_quantity` for accurate calculations
+- `yd_offset_quantity` accumulates intraday and is exposed publicly so callers
+  can read both how much of yesterday's position has been closed today and
+  the remaining amount via `yd_remaining_quantity`
 
 ## Development
 

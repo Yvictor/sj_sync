@@ -1993,7 +1993,7 @@ wheels = [
 
 [[package]]
 name = "sj-sync"
-version = "0.1.11"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
