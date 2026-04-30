@@ -1,6 +1,6 @@
 """Position models for sj_sync."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from typing import Union, TypedDict
 from shioaji.constant import Action, StockOrderCond
 
@@ -15,11 +15,14 @@ class AccountDict(TypedDict):
 class StockPosition(BaseModel):
     """Stock position model for external API.
 
-    Public-facing position model with essential fields:
+    Public-facing position model:
     - code: Stock symbol
     - direction: Buy or Sell (Action enum)
     - quantity: Current position quantity (in shares or lots depending on unit)
     - yd_quantity: Yesterday's position quantity (fixed reference, never modified)
+    - yd_offset_quantity: Amount of yd_quantity already offset by today's
+      opposite-direction trades (accumulates intraday)
+    - yd_remaining_quantity: Computed; yd_quantity - yd_offset_quantity
     - cond: Order condition (StockOrderCond enum)
     """
 
@@ -31,27 +34,19 @@ class StockPosition(BaseModel):
     yd_quantity: int = Field(
         default=0, description="Yesterday's position quantity (fixed)"
     )
+    yd_offset_quantity: int = Field(
+        default=0,
+        description="Amount of yd_quantity offset by today's opposite-direction trades",
+    )
     cond: StockOrderCond = Field(
         default=StockOrderCond.Cash, description="Order condition"
     )
 
-
-class StockPositionInner(StockPosition):
-    """Internal stock position model with calculation fields.
-
-    Extends StockPosition with internal tracking fields:
-    - yd_offset_quantity: Yesterday's offset quantity (accumulated today)
-
-    This is used internally for position calculations and is never exposed to users.
-
-    Calculations:
-    - Yesterday's actual remaining = yd_quantity - yd_offset_quantity
-    - Today's actual remaining = quantity - (yd_quantity - yd_offset_quantity)
-    """
-
-    yd_offset_quantity: int = Field(
-        default=0, description="Yesterday's offset quantity (today)"
-    )
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def yd_remaining_quantity(self) -> int:
+        """Yesterday's remaining quantity = yd_quantity - yd_offset_quantity."""
+        return self.yd_quantity - self.yd_offset_quantity
 
 
 class FuturesPosition(BaseModel):

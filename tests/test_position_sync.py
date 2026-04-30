@@ -927,10 +927,8 @@ class TestSmartSync:
         new_pnl.cond = StockOrderCond.Cash
 
         # Add a position to local that's not in API
-        from sj_sync.models import StockPositionInner
-
         sync._stock_positions[account_key][("1101", StockOrderCond.Cash)] = (
-            StockPositionInner(
+            StockPosition(
                 code="1101",
                 direction=Action.Buy,
                 quantity=3,
@@ -1153,3 +1151,249 @@ class TestSmartSync:
         # Should return local positions (2500) not API positions (1000)
         assert len(positions) == 1
         assert positions[0].quantity == 2500  # 2000 + 500 from deal during query
+
+
+class TestYdOffsetExposure:
+    """Test that yd_offset_quantity and yd_remaining_quantity are exposed on
+    public StockPosition."""
+
+    def test_stock_position_remaining_computed(self):
+        """yd_remaining_quantity = yd_quantity - yd_offset_quantity."""
+        pos = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=3,
+        )
+        assert pos.yd_remaining_quantity == 7
+
+    def test_stock_position_remaining_default_zero_offset(self):
+        """With no offset, remaining equals yd_quantity."""
+        pos = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+        )
+        assert pos.yd_offset_quantity == 0
+        assert pos.yd_remaining_quantity == 10
+
+    def test_stock_position_dump_includes_both_fields(self):
+        """model_dump() and JSON include both yd_offset_quantity and yd_remaining_quantity."""
+        pos = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=4,
+        )
+        dumped = pos.model_dump()
+        assert dumped["yd_offset_quantity"] == 4
+        assert dumped["yd_remaining_quantity"] == 6
+
+        json_str = pos.model_dump_json()
+        assert "yd_offset_quantity" in json_str
+        assert "yd_remaining_quantity" in json_str
+
+    def test_stock_position_remaining_not_settable(self):
+        """Passing yd_remaining_quantity to constructor is silently ignored;
+        the computed value is still derived from yd_quantity - yd_offset_quantity."""
+        pos = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=2,
+            yd_remaining_quantity=999,  # type: ignore[call-arg]
+        )
+        assert pos.yd_remaining_quantity == 8  # 10 - 2, not 999
+
+    def test_stock_position_offset_affects_equality(self):
+        """yd_offset_quantity is a real field, so it participates in __eq__."""
+        a = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=3,
+        )
+        b = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=5,
+        )
+        assert a != b
+
+    def test_list_positions_exposes_yd_offset_after_init(self, mock_api):
+        """After initialization that computes yd_offset from today's trades,
+        list_positions() returns positions with the calculated yd_offset_quantity."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 7
+        pnl.yd_quantity = 10
+        pnl.cond = StockOrderCond.Cash
+
+        # Today sold 3 lots of yesterday's holding -> yd_offset should be 3
+        sold_trade = Mock()
+        sold_trade.contract = Mock()
+        sold_trade.contract.code = "2330"
+        sold_trade.order = Mock()
+        sold_trade.order.account = account
+        sold_trade.order.order_cond = StockOrderCond.Cash
+        sold_trade.order.action = Action.Sell
+        sold_trade.status = Mock()
+        from shioaji.constant import Status
+
+        sold_trade.status.status = Status.Filled
+        sold_trade.status.deal_quantity = 3
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = [sold_trade]
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+        positions = sync.list_positions()
+
+        assert len(positions) == 1
+        assert positions[0].yd_quantity == 10
+        assert positions[0].yd_offset_quantity == 3
+        assert positions[0].yd_remaining_quantity == 7
+
+    def test_yd_offset_updates_on_normal_trading_offset_deal(self, mock_api):
+        """Normal-trading opposite-direction deal updates yd_offset_quantity,
+        and the public position reflects it."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+
+        # Yesterday's MarginTrading buy of 10
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 10
+        pnl.yd_quantity = 10
+        pnl.cond = StockOrderCond.MarginTrading
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = []
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+
+        # MarginTrading sell of 4 (closes 4 of yesterday's position)
+        sell_deal = create_stock_deal(
+            account, "2330", "Sell", 4, 510.0, "MarginTrading"
+        )
+        sync.on_order_deal_event(OrderState.StockDeal, sell_deal)
+
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        assert positions[0].quantity == 6
+        assert positions[0].yd_quantity == 10
+        assert positions[0].yd_offset_quantity == 4
+        assert positions[0].yd_remaining_quantity == 6
+
+    def test_convert_api_positions_fallback_zero_when_local_missing(self, mock_api):
+        """In stable-period API path, when API has a (code, cond) that local
+        does not, yd_offset_quantity falls back to 0 (background sync corrects later)."""
+        import datetime
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+
+        # Initialize with empty local
+        mock_api.list_positions.return_value = []
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Force stable-period: simulate last deal in distant past
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=10)
+        )
+
+        # API now returns a position not present locally
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 10
+        pnl.yd_quantity = 10
+        pnl.cond = StockOrderCond.Cash
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = []
+
+        positions = sync.list_positions()
+        sync._executor.shutdown(wait=True)
+
+        assert len(positions) == 1
+        # Fallback path: local was empty so yd_offset defaults to 0
+        assert positions[0].yd_offset_quantity == 0
+        assert positions[0].yd_remaining_quantity == 10
+
+    def test_convert_api_positions_uses_local_yd_offset(self, mock_api):
+        """In stable-period API path, when local already has the (code, cond),
+        yd_offset_quantity is taken from local."""
+        import datetime
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+        from shioaji.constant import Status
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+
+        # Initialize with a position that has yd_offset=2 (today sold 2)
+        pnl_init = Mock(spec=SjStockPosition)
+        pnl_init.code = "2330"
+        pnl_init.direction = Action.Buy
+        pnl_init.quantity = 8
+        pnl_init.yd_quantity = 10
+        pnl_init.cond = StockOrderCond.Cash
+
+        sold_trade = Mock()
+        sold_trade.contract = Mock()
+        sold_trade.contract.code = "2330"
+        sold_trade.order = Mock()
+        sold_trade.order.account = account
+        sold_trade.order.order_cond = StockOrderCond.Cash
+        sold_trade.order.action = Action.Sell
+        sold_trade.status = Mock()
+        sold_trade.status.status = Status.Filled
+        sold_trade.status.deal_quantity = 2
+
+        mock_api.list_positions.return_value = [pnl_init]
+        mock_api.list_trades.return_value = [sold_trade]
+
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Force stable-period
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=10)
+        )
+
+        # Same (code, cond) returned by API on the next query
+        positions = sync.list_positions()
+        sync._executor.shutdown(wait=True)
+
+        assert len(positions) == 1
+        assert positions[0].yd_offset_quantity == 2
+        assert positions[0].yd_remaining_quantity == 8

@@ -19,7 +19,7 @@ from shioaji.constant import OrderState, Action, StockOrderCond, Unit, Status
 from shioaji.account import Account, AccountType
 from shioaji.position import StockPosition as SjStockPostion
 from shioaji.position import FuturePosition as SjFuturePostion
-from .models import StockPosition, StockPositionInner, FuturesPosition, AccountDict
+from .models import StockPosition, FuturesPosition, AccountDict
 from .types import StockDeal, FuturesDeal
 
 # Configure logger: add file handler for sj_sync logs (INFO and above)
@@ -43,7 +43,7 @@ class StockInconsistency(TypedDict):
     code: str
     cond: StockOrderCond
     api: Optional[SjStockPostion]
-    local: Optional[StockPositionInner]
+    local: Optional[StockPosition]
 
 
 class PositionSync:
@@ -76,11 +76,11 @@ class PositionSync:
         self.api.set_order_callback(self._internal_callback)
 
         # Separate dicts for stock and futures positions
-        # Stock: {account_key: {(code, cond): StockPositionInner}}
+        # Stock: {account_key: {(code, cond): StockPosition}}
         # Futures: {account_key: {code: FuturesPosition}}
         # account_key = broker_id + account_id
         self._stock_positions: Dict[
-            str, Dict[Tuple[str, StockOrderCond], StockPositionInner]
+            str, Dict[Tuple[str, StockOrderCond], StockPosition]
         ] = {}
         self._futures_positions: Dict[str, Dict[str, FuturesPosition]] = {}
 
@@ -165,7 +165,7 @@ class PositionSync:
                         trades_sum=trades_sum,
                     )
 
-                    position = StockPositionInner(
+                    position = StockPosition(
                         code=pnl.code,
                         direction=pnl.direction,
                         quantity=pnl.quantity,
@@ -311,25 +311,6 @@ class PositionSync:
 
         return now - last_time < threshold
 
-    def _convert_to_public_stock_position(
-        self, inner: StockPositionInner
-    ) -> StockPosition:
-        """Convert internal position to public position (without yd_offset_quantity).
-
-        Args:
-            inner: Internal stock position with yd_offset_quantity
-
-        Returns:
-            Public StockPosition without internal fields
-        """
-        return StockPosition(
-            code=inner.code,
-            direction=inner.direction,
-            quantity=inner.quantity,
-            yd_quantity=inner.yd_quantity,
-            cond=inner.cond,
-        )
-
     def _get_local_positions(
         self, account: Optional[Account] = None
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
@@ -350,10 +331,7 @@ class PositionSync:
             ):
                 stock_key = self._get_account_key(self.api.stock_account)
                 if stock_key in self._stock_positions:
-                    return [
-                        self._convert_to_public_stock_position(pos)
-                        for pos in self._stock_positions[stock_key].values()
-                    ]
+                    return list(self._stock_positions[stock_key].values())
 
             # Then try futopt_account
             if (
@@ -376,10 +354,7 @@ class PositionSync:
 
         if account_type == AccountType.Stock:
             if account_key in self._stock_positions:
-                return [
-                    self._convert_to_public_stock_position(pos)
-                    for pos in self._stock_positions[account_key].values()
-                ]
+                return list(self._stock_positions[account_key].values())
             return []
         elif account_type == AccountType.Future:
             if account_key in self._futures_positions:
@@ -556,6 +531,14 @@ class PositionSync:
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Convert API position format to our StockPosition/FuturesPosition format.
 
+        For stock positions, yd_offset_quantity is taken from the existing local
+        position when available. If a (code, cond) appears in the API but not in
+        local (rare; sync_threshold > 0 stable-period path), yd_offset_quantity
+        falls back to 0 — meaning yd_remaining_quantity will momentarily equal
+        yd_quantity. The background sync thread (_compare_and_sync_stock) will
+        recompute the correct value via _load_and_sum_today_trades shortly after,
+        so subsequent list_positions() calls return the corrected value.
+
         Args:
             api_positions: Positions from api.list_positions()
             account: Account (to determine type)
@@ -573,14 +556,21 @@ class PositionSync:
 
         # Process based on account type
         if account.account_type == AccountType.Stock:
+            account_key = self._get_account_key(account)
+            local_dict = self._stock_positions.get(account_key, {})
             stock_list: List[StockPosition] = []
             for pnl in api_positions:
                 if isinstance(pnl, SjStockPostion):
+                    local_pos = local_dict.get((pnl.code, pnl.cond))
+                    yd_offset = (
+                        local_pos.yd_offset_quantity if local_pos is not None else 0
+                    )
                     pos = StockPosition(
                         code=pnl.code,
                         direction=pnl.direction,
                         quantity=pnl.quantity,
                         yd_quantity=pnl.yd_quantity,
+                        yd_offset_quantity=yd_offset,
                         cond=pnl.cond,
                     )
                     stock_list.append(pos)
@@ -739,7 +729,7 @@ class PositionSync:
                 trades_sum=trades_sum,
             )
 
-            position = StockPositionInner(
+            position = StockPosition(
                 code=code,
                 direction=api_pos.direction,
                 quantity=api_pos.quantity,
@@ -1075,7 +1065,7 @@ class PositionSync:
         position = self._stock_positions[account_key].get(key)
 
         if position is None:
-            position = StockPositionInner(
+            position = StockPosition(
                 code=code,
                 direction=action,
                 quantity=quantity,
