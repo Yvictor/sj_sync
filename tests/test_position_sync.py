@@ -1346,9 +1346,7 @@ class TestYdOffsetExposure:
         assert positions[0].yd_offset_quantity == 0
         assert positions[0].yd_remaining_quantity == 10
 
-    def test_convert_api_positions_computes_offset_when_local_missing(
-        self, mock_api
-    ):
+    def test_convert_api_positions_computes_offset_when_local_missing(self, mock_api):
         """In stable-period API path, when API has a (code, cond) that local
         does NOT, yd_offset_quantity is still computed correctly from today's
         trades — there is no misleading fallback to 0."""
