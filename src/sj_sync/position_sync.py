@@ -316,11 +316,16 @@ class PositionSync:
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Get positions from local tracking.
 
+        Returns shallow copies (model_copy()) so callers cannot mutate the
+        internal cache and so the returned list is a stable snapshot — the
+        deal-callback path mutates the cached objects in place, so handing
+        out the live references would let those values shift under callers.
+
         Args:
             account: Account to filter. None uses default account.
 
         Returns:
-            List of locally tracked positions
+            List of locally tracked positions (independent copies)
         """
         if account is None:
             # When account is None, try to find account with positions
@@ -331,7 +336,10 @@ class PositionSync:
             ):
                 stock_key = self._get_account_key(self.api.stock_account)
                 if stock_key in self._stock_positions:
-                    return list(self._stock_positions[stock_key].values())
+                    return [
+                        pos.model_copy()
+                        for pos in self._stock_positions[stock_key].values()
+                    ]
 
             # Then try futopt_account
             if (
@@ -340,10 +348,10 @@ class PositionSync:
             ):
                 futopt_key = self._get_account_key(self.api.futopt_account)
                 if futopt_key in self._futures_positions:
-                    futures_list: List[FuturesPosition] = list(
-                        self._futures_positions[futopt_key].values()
-                    )
-                    return futures_list
+                    return [
+                        pos.model_copy()
+                        for pos in self._futures_positions[futopt_key].values()
+                    ]
 
             # No positions found
             return []
@@ -354,14 +362,17 @@ class PositionSync:
 
         if account_type == AccountType.Stock:
             if account_key in self._stock_positions:
-                return list(self._stock_positions[account_key].values())
+                return [
+                    pos.model_copy()
+                    for pos in self._stock_positions[account_key].values()
+                ]
             return []
         elif account_type == AccountType.Future:
             if account_key in self._futures_positions:
-                futures_list: List[FuturesPosition] = list(
-                    self._futures_positions[account_key].values()
-                )
-                return futures_list
+                return [
+                    pos.model_copy()
+                    for pos in self._futures_positions[account_key].values()
+                ]
             return []
 
         return []
@@ -531,13 +542,12 @@ class PositionSync:
     ) -> Union[List[StockPosition], List[FuturesPosition]]:
         """Convert API position format to our StockPosition/FuturesPosition format.
 
-        For stock positions, yd_offset_quantity is taken from the existing local
-        position when available. If a (code, cond) appears in the API but not in
-        local (rare; sync_threshold > 0 stable-period path), yd_offset_quantity
-        falls back to 0 — meaning yd_remaining_quantity will momentarily equal
-        yd_quantity. The background sync thread (_compare_and_sync_stock) will
-        recompute the correct value via _load_and_sum_today_trades shortly after,
-        so subsequent list_positions() calls return the corrected value.
+        For stock positions, yd_offset_quantity is computed from today's filled
+        trades via _load_and_sum_today_trades + _calculate_yd_offset_for_position
+        so the immediately returned yd_remaining_quantity is correct even when
+        the position is new to local state. This matches the calculation that
+        the background sync thread performs and means callers cannot observe a
+        misleading yd_offset_quantity=0 transient value.
 
         Args:
             api_positions: Positions from api.list_positions()
@@ -556,14 +566,16 @@ class PositionSync:
 
         # Process based on account type
         if account.account_type == AccountType.Stock:
-            account_key = self._get_account_key(account)
-            local_dict = self._stock_positions.get(account_key, {})
+            trades_sum = self._load_and_sum_today_trades(account)
             stock_list: List[StockPosition] = []
             for pnl in api_positions:
                 if isinstance(pnl, SjStockPostion):
-                    local_pos = local_dict.get((pnl.code, pnl.cond))
-                    yd_offset = (
-                        local_pos.yd_offset_quantity if local_pos is not None else 0
+                    yd_offset = self._calculate_yd_offset_for_position(
+                        code=pnl.code,
+                        cond=pnl.cond,
+                        direction=pnl.direction,
+                        yd_quantity=pnl.yd_quantity,
+                        trades_sum=trades_sum,
                     )
                     pos = StockPosition(
                         code=pnl.code,

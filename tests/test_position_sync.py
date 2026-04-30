@@ -1307,9 +1307,9 @@ class TestYdOffsetExposure:
         assert positions[0].yd_offset_quantity == 4
         assert positions[0].yd_remaining_quantity == 6
 
-    def test_convert_api_positions_fallback_zero_when_local_missing(self, mock_api):
-        """In stable-period API path, when API has a (code, cond) that local
-        does not, yd_offset_quantity falls back to 0 (background sync corrects later)."""
+    def test_convert_api_positions_no_trades_yields_zero_offset(self, mock_api):
+        """In stable-period API path with no today's trades, yd_offset_quantity
+        is correctly 0 even when the position has no local entry."""
         import datetime
         from tests.conftest import create_mock_account
         from shioaji.account import AccountType
@@ -1343,13 +1343,68 @@ class TestYdOffsetExposure:
         sync._executor.shutdown(wait=True)
 
         assert len(positions) == 1
-        # Fallback path: local was empty so yd_offset defaults to 0
         assert positions[0].yd_offset_quantity == 0
         assert positions[0].yd_remaining_quantity == 10
 
-    def test_convert_api_positions_uses_local_yd_offset(self, mock_api):
-        """In stable-period API path, when local already has the (code, cond),
-        yd_offset_quantity is taken from local."""
+    def test_convert_api_positions_computes_offset_when_local_missing(
+        self, mock_api
+    ):
+        """In stable-period API path, when API has a (code, cond) that local
+        does NOT, yd_offset_quantity is still computed correctly from today's
+        trades — there is no misleading fallback to 0."""
+        import datetime
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+        from shioaji.constant import Status
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.stock_account = account
+
+        # Initialize with empty local
+        mock_api.list_positions.return_value = []
+        sync = PositionSync(mock_api, sync_threshold=1)
+
+        # Force stable-period
+        account_key = sync._get_account_key(account)  # type: ignore[arg-type]
+        sync._last_deal_time[account_key] = (
+            datetime.datetime.now() - datetime.timedelta(seconds=10)
+        )
+
+        # API now returns a position not present locally
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 7
+        pnl.yd_quantity = 10
+        pnl.cond = StockOrderCond.Cash
+        mock_api.list_positions.return_value = [pnl]
+
+        # Today sold 3 lots of yesterday's holding
+        sold_trade = Mock()
+        sold_trade.contract = Mock()
+        sold_trade.contract.code = "2330"
+        sold_trade.order = Mock()
+        sold_trade.order.account = account
+        sold_trade.order.order_cond = StockOrderCond.Cash
+        sold_trade.order.action = Action.Sell
+        sold_trade.status = Mock()
+        sold_trade.status.status = Status.Filled
+        sold_trade.status.deal_quantity = 3
+        mock_api.list_trades.return_value = [sold_trade]
+
+        positions = sync.list_positions()
+        sync._executor.shutdown(wait=True)
+
+        assert len(positions) == 1
+        # Even though local had no entry, offset is correctly derived from trades
+        assert positions[0].yd_offset_quantity == 3
+        assert positions[0].yd_remaining_quantity == 7
+
+    def test_convert_api_positions_computes_offset_from_trades(self, mock_api):
+        """In stable-period API path, yd_offset_quantity is derived from
+        today's filled trades (not from any cached local value)."""
         import datetime
         from tests.conftest import create_mock_account
         from shioaji.account import AccountType
@@ -1397,3 +1452,180 @@ class TestYdOffsetExposure:
         assert len(positions) == 1
         assert positions[0].yd_offset_quantity == 2
         assert positions[0].yd_remaining_quantity == 8
+
+    def test_list_positions_returns_copies_not_references(self, mock_api):
+        """Mutating a position returned by list_positions() must not corrupt
+        internal state — and the deal-callback mutation must not retroactively
+        change a previously-returned snapshot."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 10
+        pnl.yd_quantity = 10
+        pnl.cond = StockOrderCond.Cash
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = []
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+
+        snapshot = sync.list_positions()
+        assert snapshot[0].quantity == 10
+
+        # Mutate the returned snapshot
+        snapshot[0].quantity = 999
+        snapshot[0].yd_offset_quantity = 999
+
+        # Internal cache must be untouched
+        fresh = sync.list_positions()
+        assert fresh[0].quantity == 10
+        assert fresh[0].yd_offset_quantity == 0
+
+        # And a deal that mutates the cached object must NOT change the old snapshot
+        sell_deal = create_stock_deal(account, "2330", "Sell", 4, 510.0, "Cash")
+        sync.on_order_deal_event(OrderState.StockDeal, sell_deal)
+        # snapshot was taken before the deal — should still reflect the old quantity
+        assert snapshot[0].quantity == 999  # untouched (it was mutated locally only)
+        # but a new list_positions() call sees the deal effect
+        after = sync.list_positions()
+        assert after[0].quantity == 6
+        assert after[0].yd_offset_quantity == 4
+
+    def test_day_trade_margin_short_yd_offset_unchanged(self, mock_api):
+        """Margin↔Short day trade offsets only TODAY's quantity. yesterday's
+        position (and its yd_offset_quantity) must not change."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        # Yesterday's MarginTrading buy of 5
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 5
+        pnl.yd_quantity = 5
+        pnl.cond = StockOrderCond.MarginTrading
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = []
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+
+        # Today MarginTrading Buy +3 (creates today's portion)
+        sync.on_order_deal_event(
+            OrderState.StockDeal,
+            create_stock_deal(account, "2330", "Buy", 3, 510.0, "MarginTrading"),
+        )
+        # Today ShortSelling Sell 2 → day-trade offset against today's margin portion
+        sync.on_order_deal_event(
+            OrderState.StockDeal,
+            create_stock_deal(account, "2330", "Sell", 2, 511.0, "ShortSelling"),
+        )
+
+        positions = sync.list_positions()
+        margin = [p for p in positions if p.cond == StockOrderCond.MarginTrading][0]
+        # Margin: 5 (yd) + 3 (today) - 2 (day-trade offset of today's) = 6
+        assert margin.quantity == 6
+        # yd_offset_quantity must NOT have changed; only today's portion was offset
+        assert margin.yd_quantity == 5
+        assert margin.yd_offset_quantity == 0
+        assert margin.yd_remaining_quantity == 5
+
+    def test_cash_day_trade_remainder_creates_new_position(self, mock_api):
+        """Cash day trade where today's quantity is exhausted leaves a
+        remainder that creates a NEW opposite-direction position with
+        yd_offset_quantity=0 (it cannot offset yesterday)."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = []
+        mock_api.list_trades.return_value = []
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+
+        # Today Cash Buy 5 (today-only position, no yesterday)
+        sync.on_order_deal_event(
+            OrderState.StockDeal,
+            create_stock_deal(account, "2330", "Buy", 5, 500.0, "Cash"),
+        )
+        # Today Cash Sell 8: offsets 5 of today's, remainder 3 becomes new Sell
+        sync.on_order_deal_event(
+            OrderState.StockDeal,
+            create_stock_deal(account, "2330", "Sell", 8, 510.0, "Cash"),
+        )
+
+        positions = sync.list_positions()
+        assert len(positions) == 1
+        pos = positions[0]
+        assert pos.direction == Action.Sell
+        assert pos.quantity == 3
+        # New position cannot have yesterday context
+        assert pos.yd_quantity == 0
+        assert pos.yd_offset_quantity == 0
+        assert pos.yd_remaining_quantity == 0
+
+    def test_yd_offset_full_close_removes_position(self, mock_api):
+        """When a normal-trading offset closes the position completely, the
+        position is removed from local; no entry remains."""
+        from tests.conftest import create_mock_account
+        from shioaji.account import AccountType
+        from shioaji.position import StockPosition as SjStockPosition
+
+        account = create_mock_account("9100", "1234567", AccountType.Stock)
+        pnl = Mock(spec=SjStockPosition)
+        pnl.code = "2330"
+        pnl.direction = Action.Buy
+        pnl.quantity = 4
+        pnl.yd_quantity = 4
+        pnl.cond = StockOrderCond.MarginTrading
+
+        mock_api.list_accounts.return_value = [account]
+        mock_api.list_positions.return_value = [pnl]
+        mock_api.list_trades.return_value = []
+        mock_api.stock_account = account
+
+        sync = PositionSync(mock_api)
+
+        # MarginTrading Sell 4 closes the entire yesterday position
+        sync.on_order_deal_event(
+            OrderState.StockDeal,
+            create_stock_deal(account, "2330", "Sell", 4, 510.0, "MarginTrading"),
+        )
+
+        positions = sync.list_positions()
+        assert positions == []
+
+    def test_stock_position_dump_roundtrip_ignores_computed(self):
+        """model_dump_json() includes yd_remaining_quantity but feeding the
+        dumped dict back into the constructor ignores the computed field
+        (the reconstructed instance still computes it from the real fields)."""
+        original = StockPosition(
+            code="2330",
+            direction=Action.Buy,
+            quantity=10,
+            yd_quantity=10,
+            yd_offset_quantity=4,
+        )
+        dumped = original.model_dump()
+        assert dumped["yd_remaining_quantity"] == 6
+
+        # Tamper with the computed field in the dumped dict
+        dumped["yd_remaining_quantity"] = 999
+
+        # Reconstruct — computed field input is silently ignored
+        reconstructed = StockPosition(**dumped)
+        assert reconstructed.yd_remaining_quantity == 6
+        assert reconstructed == original

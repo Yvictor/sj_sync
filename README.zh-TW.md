@@ -229,12 +229,19 @@ qs.set_on_bidask_stk_callback(my_bidask_handler)
 
 ```python
 class StockPosition(BaseModel):
-    code: str           # 股票代碼（例如 "2330"）
-    direction: Action   # Action.Buy 或 Action.Sell
-    quantity: int       # 目前部位數量
-    yd_quantity: int    # 昨日部位數量
-    cond: StockOrderCond  # 現股、融資或融券
+    code: str                # 股票代碼（例如 "2330"）
+    direction: Action        # Action.Buy 或 Action.Sell
+    quantity: int            # 目前部位數量
+    yd_quantity: int         # 昨日部位數量（固定值）
+    yd_offset_quantity: int  # 今日已沖掉的昨日庫存量（盤中累計）
+    cond: StockOrderCond     # 現股、融資或融券
+
+    # 計算欄位（唯讀，會出現在 model_dump() / JSON）：
+    yd_remaining_quantity: int  # = yd_quantity - yd_offset_quantity
 ```
+
+`yd_remaining_quantity` 是 Pydantic computed field；傳入 constructor
+會被靜默忽略。它**不會**參與等值比較（只有 real fields 會）。
 
 ### FuturesPosition（期貨部位）
 
@@ -390,10 +397,11 @@ sync.sync_from_api(account=api.futopt_account)
   - 自動修正發現的任何不一致
 
 ### 4. 部位儲存
-- 股票部位：`{account_key: {(code, cond): StockPositionInner}}`
+- 股票部位：`{account_key: {(code, cond): StockPosition}}`
 - 期貨部位：`{account_key: {code: FuturesPosition}}`
 - 帳戶鍵值 = `broker_id + account_id`
-- 內部模型追蹤 `yd_offset_quantity` 供精確計算
+- `yd_offset_quantity` 盤中累計並對外公開，呼叫端可同時讀到「今日已沖掉的昨日庫存量」
+  及「昨日剩餘量」（透過 `yd_remaining_quantity`）
 
 ## 開發
 
