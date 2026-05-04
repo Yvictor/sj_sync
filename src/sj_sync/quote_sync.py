@@ -1,5 +1,6 @@
 """Real-time quote snapshot synchronization for Shioaji."""
 
+import datetime
 import time
 from typing import Callable, Dict, List, Optional, Set, Union
 
@@ -32,6 +33,26 @@ _RATE_LIMIT_WINDOW = 5.0
 
 # Batch size for api.snapshots()
 _SNAPSHOT_BATCH_SIZE = 500
+
+_EPOCH_ORDINAL = datetime.date(1970, 1, 1).toordinal()
+
+
+def _datetime_to_ns(d: datetime.datetime) -> int:
+    """Encode a Tick/BidAsk datetime to ns matching Snapshot.ts.
+
+    Shioaji's Snapshot.ts encodes TPE wall-clock fields as UTC epoch * 1e9.
+    Tick/BidAsk events deliver naive datetimes holding the same wall-clock
+    fields, so we mirror that encoding by reading components directly and
+    ignoring tzinfo. Integer-only path avoids the float precision loss that
+    would happen with int(d.timestamp() * 1e9) on microsecond inputs.
+    """
+    seconds = (
+        (d.toordinal() - _EPOCH_ORDINAL) * 86_400
+        + d.hour * 3_600
+        + d.minute * 60
+        + d.second
+    )
+    return seconds * 1_000_000_000 + d.microsecond * 1_000
 
 
 class QuoteSync:
@@ -213,6 +234,7 @@ class QuoteSync:
             if tick.code not in self._snapshots:
                 return
             snap = self._snapshots[tick.code]
+            snap.ts = _datetime_to_ns(tick.datetime)
             snap.close = float(tick.close)
             snap.open = float(tick.open)
             snap.high = float(tick.high)
@@ -248,6 +270,7 @@ class QuoteSync:
             if tick.code not in self._snapshots:
                 return
             snap = self._snapshots[tick.code]
+            snap.ts = _datetime_to_ns(tick.datetime)
             snap.close = float(tick.close)
             snap.open = float(tick.open)
             snap.high = float(tick.high)
@@ -276,6 +299,8 @@ class QuoteSync:
             if bidask.code not in self._snapshots:
                 return
             snap = self._snapshots[bidask.code]
+            # ts intentionally not updated: native Snapshot.ts only advances
+            # on deal ticks, not on bid/ask updates.
             if bidask.bid_price:
                 snap.buy_price = float(bidask.bid_price[0])
                 snap.buy_volume = int(bidask.bid_volume[0])
@@ -297,6 +322,8 @@ class QuoteSync:
             if bidask.code not in self._snapshots:
                 return
             snap = self._snapshots[bidask.code]
+            # ts intentionally not updated: native Snapshot.ts only advances
+            # on deal ticks, not on bid/ask updates.
             if bidask.bid_price:
                 snap.buy_price = float(bidask.bid_price[0])
                 snap.buy_volume = int(bidask.bid_volume[0])

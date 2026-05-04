@@ -1,5 +1,6 @@
 """Tests for QuoteSync."""
 
+import datetime
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -7,7 +8,7 @@ import pytest
 from shioaji.constant import ChangeType, QuoteType, TickType
 from shioaji.data import Snapshot
 
-from sj_sync.quote_sync import QuoteSync
+from sj_sync.quote_sync import QuoteSync, _datetime_to_ns
 
 
 # -- Helpers --
@@ -22,6 +23,7 @@ def make_contract(code: str) -> Mock:
 def make_tick(code: str, **overrides) -> Mock:
     defaults = dict(
         code=code,
+        datetime=datetime.datetime(2026, 5, 4, 10, 43, 42, 920445),
         close=Decimal("600.0"),
         open=Decimal("595.0"),
         high=Decimal("605.0"),
@@ -47,6 +49,7 @@ def make_tick(code: str, **overrides) -> Mock:
 def make_bidask(code: str, **overrides) -> Mock:
     defaults = dict(
         code=code,
+        datetime=datetime.datetime(2026, 5, 4, 10, 43, 41, 377377),
         bid_price=[Decimal("599.0"), Decimal("598.0"), Decimal("597.0")],
         bid_volume=[100, 200, 150],
         ask_price=[Decimal("600.0"), Decimal("601.0"), Decimal("602.0")],
@@ -617,3 +620,143 @@ class TestQuoteSyncBidAskCallbacks:
         bidask.code = "TXFH5"
         del bidask.bid_price
         qs._on_bidask_fop("TAIFEX", bidask)
+
+
+# -- TestSnapshotTsAlignment --
+
+
+class TestDatetimeToNs:
+    """Verify _datetime_to_ns mirrors shioaji's Snapshot.ts encoding exactly.
+
+    Shioaji encodes Snapshot.ts by treating the TPE wall-clock components
+    (year/month/day/hour/min/sec/usec) as if they were UTC seconds, then
+    multiplying by 1e9. So input wall-clock numbers and the encoded ns digits
+    line up numerically (the "8h offset" is by design — that's the quirk).
+    Reference values below come from live api.snapshots() captures.
+    """
+
+    def test_known_value_matches_live_snapshot_encoding(self):
+        # Captured live: tick.datetime (TPE wall clock) 2026-05-04 10:43:36.672775
+        # was paired with Snapshot.ts = 1777891416672775000.
+        d = datetime.datetime(2026, 5, 4, 10, 43, 36, 672775)
+        assert _datetime_to_ns(d) == 1_777_891_416_672_775_000
+
+    def test_microsecond_precision_preserved(self):
+        # Float path int(d.timestamp() * 1e9) loses ns on microsecond inputs;
+        # this regression locks in the integer-only result.
+        d = datetime.datetime(2026, 5, 4, 10, 43, 42, 920445)
+        assert _datetime_to_ns(d) == 1_777_891_422_920_445_000
+
+    def test_zero_microseconds(self):
+        d = datetime.datetime(2026, 5, 4, 0, 0, 0, 0)
+        assert _datetime_to_ns(d) == 1_777_852_800_000_000_000
+
+    def test_ignores_tzinfo(self):
+        # Encoding mirrors shioaji: tzinfo is ignored, only wall-clock fields
+        # matter. A naive value and the same value tagged with a non-UTC tz
+        # must produce identical ns.
+        naive = datetime.datetime(2026, 5, 4, 10, 43, 42, 920445)
+        aware = naive.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+        assert _datetime_to_ns(naive) == _datetime_to_ns(aware)
+
+
+class TestSnapshotTsUpdates:
+    """Streaming callbacks must update snap.ts to mirror shioaji's encoding."""
+
+    def test_tick_stk_updates_ts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        tick = make_tick(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_tick_stk("TSE", tick)
+        assert qs.snapshots(["2330"])[0].ts == 1_777_891_416_520_445_000
+
+    def test_tick_fop_updates_ts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        tick = make_tick(
+            "TXFH5",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_tick_fop("TAIFEX", tick)
+        assert qs.snapshots(["TXFH5"])[0].ts == 1_777_891_416_520_445_000
+
+    def test_bidask_stk_does_not_update_ts(self, mock_quote_api):
+        # Native Snapshot.ts only advances on deal ticks; bid/ask updates
+        # do not touch ts. Mirror that exactly.
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        baseline_ts = qs.snapshots(["2330"])[0].ts
+        bidask = make_bidask(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_bidask_stk("TSE", bidask)
+        assert qs.snapshots(["2330"])[0].ts == baseline_ts
+
+    def test_bidask_fop_does_not_update_ts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        baseline_ts = qs.snapshots(["TXFH5"])[0].ts
+        bidask = make_bidask(
+            "TXFH5",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_bidask_fop("TAIFEX", bidask)
+        assert qs.snapshots(["TXFH5"])[0].ts == baseline_ts
+
+    def test_bidask_after_tick_keeps_tick_ts(self, mock_quote_api):
+        # If a tick set ts, a subsequent bidask must NOT overwrite it.
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        tick = make_tick(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_tick_stk("TSE", tick)
+        ts_after_tick = qs.snapshots(["2330"])[0].ts
+
+        bidask = make_bidask(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 10, 50, 0, 0),
+        )
+        qs._on_bidask_stk("TSE", bidask)
+        assert qs.snapshots(["2330"])[0].ts == ts_after_tick
+
+    def test_tick_stk_simtrade_does_not_update_ts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        baseline = make_tick(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_tick_stk("TSE", baseline)
+        baseline_ts = qs.snapshots(["2330"])[0].ts
+
+        sim = make_tick(
+            "2330",
+            datetime=datetime.datetime(2026, 5, 4, 11, 0, 0, 0),
+            simtrade=1,
+        )
+        qs._on_tick_stk("TSE", sim)
+        assert qs.snapshots(["2330"])[0].ts == baseline_ts
+
+    def test_tick_fop_simtrade_does_not_update_ts(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["TXFH5"])
+        baseline = make_tick(
+            "TXFH5",
+            datetime=datetime.datetime(2026, 5, 4, 10, 43, 36, 520445),
+        )
+        qs._on_tick_fop("TAIFEX", baseline)
+        baseline_ts = qs.snapshots(["TXFH5"])[0].ts
+
+        sim = make_tick(
+            "TXFH5",
+            datetime=datetime.datetime(2026, 5, 4, 11, 0, 0, 0),
+            simtrade=1,
+        )
+        qs._on_tick_fop("TAIFEX", sim)
+        assert qs.snapshots(["TXFH5"])[0].ts == baseline_ts
