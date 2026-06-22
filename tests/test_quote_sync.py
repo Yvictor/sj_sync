@@ -211,6 +211,34 @@ class TestQuoteSyncInit:
         assert qs._user_bidask_stk_callback is None
         assert qs._user_bidask_fop_callback is None
 
+    def test_shioaji_1_5_wrappers_forward_one_argument_callbacks(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        data = SimpleNamespace(exchange="TSE")
+
+        qs._on_tick_stk = Mock()
+        qs._on_tick_fop = Mock()
+        qs._on_bidask_stk = Mock()
+        qs._on_bidask_fop = Mock()
+
+        qs._on_tick_stk_v1(data)
+        qs._on_tick_fop_v1(data)
+        qs._on_bidask_stk_v1(data)
+        qs._on_bidask_fop_v1(data)
+
+        qs._on_tick_stk.assert_called_once_with("TSE", data)
+        qs._on_tick_fop.assert_called_once_with("TSE", data)
+        qs._on_bidask_stk.assert_called_once_with("TSE", data)
+        qs._on_bidask_fop.assert_called_once_with("TSE", data)
+
+    def test_shioaji_1_5_wrappers_allow_missing_exchange(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        data = SimpleNamespace()
+        qs._on_tick_stk = Mock()
+
+        qs._on_tick_stk_v1(data)
+
+        qs._on_tick_stk.assert_called_once_with(None, data)
+
 
 # -- TestQuoteSyncSubscribe --
 
