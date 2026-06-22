@@ -8,7 +8,15 @@ from typing import Callable, Dict, List, Optional, Set, Union, cast
 
 from loguru import logger
 
-from .shioaji_compat import ChangeType, Contract, QuoteType, Snapshot, TickType, sj
+from .shioaji_compat import (
+    _SHIOAJI_VERSION,
+    ChangeType,
+    Contract,
+    QuoteType,
+    Snapshot,
+    TickType,
+    sj,
+)
 
 logger.add(
     "sj_sync.log",
@@ -80,10 +88,16 @@ class QuoteSync:
         self._user_bidask_stk_callback: Optional[Callable] = None
         self._user_bidask_fop_callback: Optional[Callable] = None
 
-        api.quote.set_on_tick_stk_v1_callback(self._on_tick_stk)
-        api.quote.set_on_tick_fop_v1_callback(self._on_tick_fop)
-        api.quote.set_on_bidask_stk_v1_callback(self._on_bidask_stk)
-        api.quote.set_on_bidask_fop_v1_callback(self._on_bidask_fop)
+        if _SHIOAJI_VERSION >= (1, 5):
+            api.set_on_tick_stk_v1_callback(self._on_tick_stk_v1)
+            api.set_on_tick_fop_v1_callback(self._on_tick_fop_v1)
+            api.set_on_bidask_stk_v1_callback(self._on_bidask_stk_v1)
+            api.set_on_bidask_fop_v1_callback(self._on_bidask_fop_v1)
+        else:
+            api.quote.set_on_tick_stk_v1_callback(self._on_tick_stk)
+            api.quote.set_on_tick_fop_v1_callback(self._on_tick_fop)
+            api.quote.set_on_bidask_stk_v1_callback(self._on_bidask_stk)
+            api.quote.set_on_bidask_fop_v1_callback(self._on_bidask_fop)
 
     def subscribe(
         self,
@@ -221,6 +235,22 @@ class QuoteSync:
         self._user_bidask_fop_callback = callback
 
     # -- Internal callbacks --
+
+    @staticmethod
+    def _quote_exchange(data):
+        return getattr(data, "exchange", None)
+
+    def _on_tick_stk_v1(self, tick) -> None:
+        self._on_tick_stk(self._quote_exchange(tick), tick)
+
+    def _on_tick_fop_v1(self, tick) -> None:
+        self._on_tick_fop(self._quote_exchange(tick), tick)
+
+    def _on_bidask_stk_v1(self, bidask) -> None:
+        self._on_bidask_stk(self._quote_exchange(bidask), bidask)
+
+    def _on_bidask_fop_v1(self, bidask) -> None:
+        self._on_bidask_fop(self._quote_exchange(bidask), bidask)
 
     def _on_tick_stk(self, exchange, tick) -> None:
         if tick.simtrade:

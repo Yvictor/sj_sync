@@ -101,6 +101,10 @@ def mock_quote_api():
     api.quote.set_on_tick_fop_v1_callback = Mock()
     api.quote.set_on_bidask_stk_v1_callback = Mock()
     api.quote.set_on_bidask_fop_v1_callback = Mock()
+    api.set_on_tick_stk_v1_callback = Mock()
+    api.set_on_tick_fop_v1_callback = Mock()
+    api.set_on_bidask_stk_v1_callback = Mock()
+    api.set_on_bidask_fop_v1_callback = Mock()
 
     # Contract resolution: Stocks has "2330" and "2317", Futures has "TXFH5"
     stock_2330 = make_contract("2330")
@@ -149,7 +153,32 @@ def mock_quote_api():
 
 
 class TestQuoteSyncInit:
-    def test_registers_all_four_callbacks(self, mock_quote_api):
+    def test_registers_shioaji_1_5_single_argument_callbacks(
+        self, mock_quote_api, monkeypatch
+    ):
+        monkeypatch.setattr("sj_sync.quote_sync._SHIOAJI_VERSION", (1, 5, 3))
+        qs = QuoteSync(mock_quote_api)
+        mock_quote_api.set_on_tick_stk_v1_callback.assert_called_once_with(
+            qs._on_tick_stk_v1
+        )
+        mock_quote_api.set_on_tick_fop_v1_callback.assert_called_once_with(
+            qs._on_tick_fop_v1
+        )
+        mock_quote_api.set_on_bidask_stk_v1_callback.assert_called_once_with(
+            qs._on_bidask_stk_v1
+        )
+        mock_quote_api.set_on_bidask_fop_v1_callback.assert_called_once_with(
+            qs._on_bidask_fop_v1
+        )
+        mock_quote_api.quote.set_on_tick_stk_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_tick_fop_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_bidask_stk_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_bidask_fop_v1_callback.assert_not_called()
+
+    def test_registers_shioaji_1_3_two_argument_callbacks(
+        self, mock_quote_api, monkeypatch
+    ):
+        monkeypatch.setattr("sj_sync.quote_sync._SHIOAJI_VERSION", (1, 3, 3))
         qs = QuoteSync(mock_quote_api)
         mock_quote_api.quote.set_on_tick_stk_v1_callback.assert_called_once_with(
             qs._on_tick_stk
@@ -163,6 +192,10 @@ class TestQuoteSyncInit:
         mock_quote_api.quote.set_on_bidask_fop_v1_callback.assert_called_once_with(
             qs._on_bidask_fop
         )
+        mock_quote_api.set_on_tick_stk_v1_callback.assert_not_called()
+        mock_quote_api.set_on_tick_fop_v1_callback.assert_not_called()
+        mock_quote_api.set_on_bidask_stk_v1_callback.assert_not_called()
+        mock_quote_api.set_on_bidask_fop_v1_callback.assert_not_called()
 
     def test_empty_initial_state(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
