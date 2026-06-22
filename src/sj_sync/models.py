@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 from typing import Union, TypedDict
-from shioaji.constant import Action, StockOrderCond
+from .shioaji_compat import Action, StockOrderCond
 
 
 class AccountDict(TypedDict):

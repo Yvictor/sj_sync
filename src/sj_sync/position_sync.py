@@ -14,11 +14,18 @@ from typing import (
 )
 import datetime
 from concurrent.futures import ThreadPoolExecutor
-import shioaji as sj
-from shioaji.constant import OrderState, Action, StockOrderCond, Unit, Status
-from shioaji.account import Account, AccountType
-from shioaji.position import StockPosition as SjStockPostion
-from shioaji.position import FuturePosition as SjFuturePostion
+from .shioaji_compat import (
+    sj,
+    Account,
+    AccountType,
+    Action,
+    OrderState,
+    SjFuturePosition,
+    SjStockPosition,
+    Status,
+    StockOrderCond,
+    Unit,
+)
 from .models import StockPosition, FuturesPosition, AccountDict
 from .types import StockDeal, FuturesDeal
 
@@ -42,7 +49,7 @@ class StockInconsistency(TypedDict):
     type: Literal["missing_local", "mismatch", "missing_api"]
     code: str
     cond: StockOrderCond
-    api: Optional[SjStockPostion]
+    api: Optional[SjStockPosition]
     local: Optional[StockPosition]
 
 
@@ -155,7 +162,7 @@ class PositionSync:
             self._stock_positions[account_key] = {}
 
             for pnl in positions_pnl:
-                if isinstance(pnl, SjStockPostion):
+                if isinstance(pnl, SjStockPosition):
                     # Calculate yd_offset_quantity
                     yd_offset = self._calculate_yd_offset_for_position(
                         code=pnl.code,
@@ -181,7 +188,7 @@ class PositionSync:
             self._futures_positions[account_key] = {}
 
             for pnl in positions_pnl:
-                if isinstance(pnl, SjFuturePostion):
+                if isinstance(pnl, SjFuturePosition):
                     position = FuturesPosition(
                         code=pnl.code,
                         direction=pnl.direction,
@@ -569,7 +576,7 @@ class PositionSync:
             trades_sum = self._load_and_sum_today_trades(account)
             stock_list: List[StockPosition] = []
             for pnl in api_positions:
-                if isinstance(pnl, SjStockPostion):
+                if isinstance(pnl, SjStockPosition):
                     yd_offset = self._calculate_yd_offset_for_position(
                         code=pnl.code,
                         cond=pnl.cond,
@@ -590,7 +597,7 @@ class PositionSync:
         else:
             futures_list: List[FuturesPosition] = []
             for pnl in api_positions:
-                if isinstance(pnl, SjFuturePostion):
+                if isinstance(pnl, SjFuturePosition):
                     pos = FuturesPosition(
                         code=pnl.code,
                         direction=pnl.direction,
@@ -612,9 +619,9 @@ class PositionSync:
         account_key = self._get_account_key(account)
 
         # Build dict from API positions for easy lookup
-        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPostion] = {}
+        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPosition] = {}
         for pnl in api_positions:
-            if isinstance(pnl, SjStockPostion):
+            if isinstance(pnl, SjStockPosition):
                 key = (pnl.code, pnl.cond)
                 api_dict[key] = pnl
 
@@ -674,7 +681,7 @@ class PositionSync:
         self,
         inconsistencies: List[StockInconsistency],
         account: Account,
-        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPostion],
+        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPosition],
     ) -> None:
         """Handle stock position inconsistencies - log and update local.
 
@@ -716,7 +723,7 @@ class PositionSync:
     def _update_local_from_api_stock(
         self,
         account: Account,
-        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPostion],
+        api_dict: Dict[Tuple[str, StockOrderCond], SjStockPosition],
     ) -> None:
         """Update local stock positions from API positions.
 
@@ -764,7 +771,7 @@ class PositionSync:
         self._futures_positions[account_key] = {}
 
         for pnl in api_positions:
-            if isinstance(pnl, SjFuturePostion):
+            if isinstance(pnl, SjFuturePosition):
                 position = FuturesPosition(
                     code=pnl.code,
                     direction=pnl.direction,
@@ -1158,12 +1165,17 @@ class PositionSync:
         """
         if isinstance(direction, Action):
             return direction
-        # Convert string to Action enum
-        if direction == "Buy" or direction == "buy":
+        # Convert string to Action enum/constants. Shioaji 1.5 constants are
+        # Rust-backed classes and are not subscriptable like Python Enum.
+        normalized = str(direction)
+        if normalized.lower() == "buy":
             return Action.Buy
-        elif direction == "Sell" or direction == "sell":
+        if normalized.lower() == "sell":
             return Action.Sell
-        return Action[direction]  # Fallback to enum lookup
+        try:
+            return getattr(Action, normalized)
+        except AttributeError:
+            return Action[normalized]  # type: ignore[index]
 
     def _normalize_cond(self, cond: Union[StockOrderCond, str]) -> StockOrderCond:
         """Normalize order condition to StockOrderCond enum.
@@ -1176,9 +1188,15 @@ class PositionSync:
         """
         if isinstance(cond, StockOrderCond):
             return cond
-        # Convert string to StockOrderCond enum
+        # Convert string to StockOrderCond enum/constants. Shioaji 1.5 constants
+        # expose attributes but do not support StockOrderCond["Cash"].
+        normalized = str(cond)
         try:
-            return StockOrderCond[cond]
-        except KeyError:
+            return getattr(StockOrderCond, normalized)
+        except AttributeError:
+            pass
+        try:
+            return StockOrderCond[normalized]  # type: ignore[index]
+        except (KeyError, TypeError):
             # Fallback to Cash if invalid
             return StockOrderCond.Cash

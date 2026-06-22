@@ -105,7 +105,7 @@ Register your own callback to receive deal events while maintaining automatic po
 
 ```python
 from sj_sync import PositionSync, OrderDealCallback
-from shioaji.constant import OrderState
+from sj_sync.shioaji_compat import OrderState
 
 # Create PositionSync instance
 sync = PositionSync(api, sync_threshold=30)
@@ -176,6 +176,7 @@ Real-time quote snapshots via streaming, without repeatedly calling `api.snapsho
 ```python
 import shioaji as sj
 from sj_sync import QuoteSync
+from sj_sync.shioaji_compat import QuoteType
 
 api = sj.Shioaji()
 api.login("YOUR_API_KEY", "YOUR_SECRET_KEY")
@@ -187,7 +188,7 @@ qs = QuoteSync(api)
 qs.subscribe(["2330", "2317"])
 
 # Subscribe to Tick + BidAsk for real-time bid/ask prices
-qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk])
+qs.subscribe(["2330"], quote_type=[QuoteType.Tick, QuoteType.BidAsk])
 
 # Query snapshots locally (zero API calls)
 all_snaps = qs.snapshots()              # all subscribed
@@ -195,7 +196,7 @@ filtered = qs.snapshots(["2330"])       # filtered by codes
 
 # Unsubscribe
 qs.unsubscribe(["2317"])                                        # all types
-qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])  # partial
+qs.unsubscribe(["2330"], quote_type=[QuoteType.BidAsk])  # partial
 ```
 
 **User Callbacks:**

@@ -7,8 +7,7 @@ margin trading and day trading offset rules.
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
 from unittest.mock import Mock
-from shioaji.constant import Action, StockOrderCond, OrderState
-from shioaji.account import AccountType
+from sj_sync.shioaji_compat import AccountType, Action, OrderState, StockOrderCond
 from sj_sync.position_sync import PositionSync
 
 

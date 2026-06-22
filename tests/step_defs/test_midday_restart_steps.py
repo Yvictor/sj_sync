@@ -7,9 +7,13 @@ restarts during trading hours with existing trades.
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
 from unittest.mock import Mock
-from shioaji.constant import Action, StockOrderCond, Status
-from shioaji.account import AccountType
-from shioaji.position import StockPosition as SjStockPostion
+from sj_sync.shioaji_compat import (
+    AccountType,
+    Action,
+    SjStockPosition,
+    Status,
+    StockOrderCond,
+)
 from sj_sync.position_sync import PositionSync
 
 
@@ -96,7 +100,7 @@ def create_mock_position(
     code: str, direction: str, quantity: int, yd_quantity: int, cond: str
 ):
     """Create a mock position from list_positions."""
-    pos = Mock(spec=SjStockPostion)
+    pos = Mock(spec=SjStockPosition)
     pos.code = code
     pos.direction = Action.Buy if direction == "Buy" else Action.Sell
     pos.quantity = quantity

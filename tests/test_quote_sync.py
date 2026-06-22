@@ -2,11 +2,11 @@
 
 import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from shioaji.constant import ChangeType, QuoteType, TickType
-from shioaji.data import Snapshot
+from sj_sync.shioaji_compat import ChangeType, QuoteType, TickType
 
 from sj_sync.quote_sync import QuoteSync, _datetime_to_ns
 
@@ -62,6 +62,35 @@ def make_bidask(code: str, **overrides) -> Mock:
     return bidask
 
 
+def make_snapshot(code: str = "", **overrides):
+    defaults = dict(
+        ts=0,
+        code=code,
+        exchange="",
+        open=0.0,
+        high=0.0,
+        low=0.0,
+        close=0.0,
+        tick_type=TickType.No,
+        change_price=0.0,
+        change_rate=0.0,
+        change_type=ChangeType.Unchanged,
+        average_price=0.0,
+        volume=0,
+        total_volume=0,
+        amount=0,
+        total_amount=0,
+        yesterday_volume=0.0,
+        buy_price=0.0,
+        buy_volume=0.0,
+        sell_price=0.0,
+        sell_volume=0,
+        volume_ratio=0.0,
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
 @pytest.fixture
 def mock_quote_api():
     """Mock Shioaji API with quote-related methods."""
@@ -72,6 +101,10 @@ def mock_quote_api():
     api.quote.set_on_tick_fop_v1_callback = Mock()
     api.quote.set_on_bidask_stk_v1_callback = Mock()
     api.quote.set_on_bidask_fop_v1_callback = Mock()
+    api.set_on_tick_stk_v1_callback = Mock()
+    api.set_on_tick_fop_v1_callback = Mock()
+    api.set_on_bidask_stk_v1_callback = Mock()
+    api.set_on_bidask_fop_v1_callback = Mock()
 
     # Contract resolution: Stocks has "2330" and "2317", Futures has "TXFH5"
     stock_2330 = make_contract("2330")
@@ -102,12 +135,13 @@ def mock_quote_api():
     def mock_snapshots(contracts):
         result = []
         for c in contracts:
-            snap = Snapshot()
-            snap.code = c.code
-            snap.close = 600.0
-            snap.open = 595.0
-            snap.high = 605.0
-            snap.low = 590.0
+            snap = make_snapshot(
+                c.code,
+                close=600.0,
+                open=595.0,
+                high=605.0,
+                low=590.0,
+            )
             result.append(snap)
         return result
 
@@ -119,7 +153,32 @@ def mock_quote_api():
 
 
 class TestQuoteSyncInit:
-    def test_registers_all_four_callbacks(self, mock_quote_api):
+    def test_registers_shioaji_1_5_single_argument_callbacks(
+        self, mock_quote_api, monkeypatch
+    ):
+        monkeypatch.setattr("sj_sync.quote_sync._SHIOAJI_VERSION", (1, 5, 3))
+        qs = QuoteSync(mock_quote_api)
+        mock_quote_api.set_on_tick_stk_v1_callback.assert_called_once_with(
+            qs._on_tick_stk_v1
+        )
+        mock_quote_api.set_on_tick_fop_v1_callback.assert_called_once_with(
+            qs._on_tick_fop_v1
+        )
+        mock_quote_api.set_on_bidask_stk_v1_callback.assert_called_once_with(
+            qs._on_bidask_stk_v1
+        )
+        mock_quote_api.set_on_bidask_fop_v1_callback.assert_called_once_with(
+            qs._on_bidask_fop_v1
+        )
+        mock_quote_api.quote.set_on_tick_stk_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_tick_fop_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_bidask_stk_v1_callback.assert_not_called()
+        mock_quote_api.quote.set_on_bidask_fop_v1_callback.assert_not_called()
+
+    def test_registers_shioaji_1_3_two_argument_callbacks(
+        self, mock_quote_api, monkeypatch
+    ):
+        monkeypatch.setattr("sj_sync.quote_sync._SHIOAJI_VERSION", (1, 3, 3))
         qs = QuoteSync(mock_quote_api)
         mock_quote_api.quote.set_on_tick_stk_v1_callback.assert_called_once_with(
             qs._on_tick_stk
@@ -133,6 +192,10 @@ class TestQuoteSyncInit:
         mock_quote_api.quote.set_on_bidask_fop_v1_callback.assert_called_once_with(
             qs._on_bidask_fop
         )
+        mock_quote_api.set_on_tick_stk_v1_callback.assert_not_called()
+        mock_quote_api.set_on_tick_fop_v1_callback.assert_not_called()
+        mock_quote_api.set_on_bidask_stk_v1_callback.assert_not_called()
+        mock_quote_api.set_on_bidask_fop_v1_callback.assert_not_called()
 
     def test_empty_initial_state(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
@@ -148,6 +211,34 @@ class TestQuoteSyncInit:
         assert qs._user_bidask_stk_callback is None
         assert qs._user_bidask_fop_callback is None
 
+    def test_shioaji_1_5_wrappers_forward_one_argument_callbacks(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        data = SimpleNamespace(exchange="TSE")
+
+        qs._on_tick_stk = Mock()
+        qs._on_tick_fop = Mock()
+        qs._on_bidask_stk = Mock()
+        qs._on_bidask_fop = Mock()
+
+        qs._on_tick_stk_v1(data)
+        qs._on_tick_fop_v1(data)
+        qs._on_bidask_stk_v1(data)
+        qs._on_bidask_fop_v1(data)
+
+        qs._on_tick_stk.assert_called_once_with("TSE", data)
+        qs._on_tick_fop.assert_called_once_with("TSE", data)
+        qs._on_bidask_stk.assert_called_once_with("TSE", data)
+        qs._on_bidask_fop.assert_called_once_with("TSE", data)
+
+    def test_shioaji_1_5_wrappers_allow_missing_exchange(self, mock_quote_api):
+        qs = QuoteSync(mock_quote_api)
+        data = SimpleNamespace()
+        qs._on_tick_stk = Mock()
+
+        qs._on_tick_stk_v1(data)
+
+        qs._on_tick_stk.assert_called_once_with(None, data)
+
 
 # -- TestQuoteSyncSubscribe --
 
@@ -161,6 +252,20 @@ class TestQuoteSyncSubscribe:
         assert snap is not None
         assert snap.code == "2330"
 
+    def test_subscribe_stores_mutable_snapshot_copy(self, mock_quote_api):
+        native_snapshot = make_snapshot("2330", close=600.0)
+        mock_quote_api.snapshots.return_value = [native_snapshot]
+        mock_quote_api.snapshots.side_effect = None
+
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        stored = qs.snapshots(["2330"])[0]
+
+        assert stored is not native_snapshot
+        stored.close = 601.0
+        assert native_snapshot.close == 600.0
+        assert stored.close == 601.0
+
     def test_subscribe_calls_api_quote_subscribe(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
@@ -168,6 +273,16 @@ class TestQuoteSyncSubscribe:
         mock_quote_api.quote.subscribe.assert_called_once_with(
             contract, quote_type=QuoteType.Tick
         )
+
+    def test_subscribe_uses_top_level_api_when_available(self, mock_quote_api):
+        mock_quote_api.subscribe = Mock()
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        contract = mock_quote_api.Contracts.Stocks.get("2330")
+        mock_quote_api.subscribe.assert_called_once_with(
+            contract, quote_type=QuoteType.Tick
+        )
+        mock_quote_api.quote.subscribe.assert_not_called()
 
     def test_subscribe_multiple_codes(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
@@ -185,7 +300,7 @@ class TestQuoteSyncSubscribe:
         qs = QuoteSync(mock_quote_api)
         contract = make_contract("CUSTOM")
         # Need to make api.snapshots handle this too
-        mock_quote_api.snapshots.side_effect = lambda cs: [Snapshot() for _ in cs]
+        mock_quote_api.snapshots.side_effect = lambda cs: [make_snapshot() for _ in cs]
         qs.subscribe(codes=["2330"], contracts=[contract])
         assert mock_quote_api.quote.subscribe.call_count == 2
 
@@ -282,6 +397,18 @@ class TestQuoteSyncUnsubscribe:
         assert len(qs.snapshots(["2330"])) == 1
         mock_quote_api.quote.unsubscribe.assert_called_once()
 
+    def test_unsubscribe_uses_top_level_api_when_available(self, mock_quote_api):
+        mock_quote_api.subscribe = Mock()
+        mock_quote_api.unsubscribe = Mock()
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        qs.unsubscribe(["2330"])
+        contract = mock_quote_api.Contracts.Stocks.get("2330")
+        mock_quote_api.unsubscribe.assert_called_once_with(
+            contract, quote_type=QuoteType.Tick
+        )
+        mock_quote_api.quote.unsubscribe.assert_not_called()
+
     def test_unsubscribe_unknown_code_no_error(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.unsubscribe(["UNKNOWN"])  # should not raise
@@ -325,7 +452,7 @@ class TestQuoteSyncSnapshots:
         qs.subscribe(codes=["2330"])
         result = qs.snapshots(["2330"])
         assert len(result) == 1
-        assert isinstance(result[0], Snapshot)
+        assert result[0].code == "2330"
 
     def test_snapshots_missing_returns_empty(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)

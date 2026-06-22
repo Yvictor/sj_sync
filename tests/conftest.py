@@ -2,10 +2,13 @@
 
 import pytest
 from unittest.mock import Mock
-from shioaji.constant import Action, StockOrderCond
-from shioaji.account import AccountType
-from shioaji.position import StockPosition as SjStockPosition
-from shioaji.position import FuturePosition as SjFuturePosition
+from sj_sync.shioaji_compat import (
+    AccountType,
+    Action,
+    SjFuturePosition,
+    SjStockPosition,
+    StockOrderCond,
+)
 
 
 def create_mock_account(

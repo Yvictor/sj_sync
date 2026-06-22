@@ -7,6 +7,7 @@ import shioaji as sj
 from dotenv import load_dotenv
 
 from sj_sync import QuoteSync
+from sj_sync.shioaji_compat import QuoteType
 
 load_dotenv()
 
@@ -49,7 +50,7 @@ print(f"\nFiltered (2330): close={filtered[0].close}")
 print("\n=== Example 2: Tick + BidAsk ===")
 
 # Add BidAsk to already-subscribed code (delta — only subscribes BidAsk)
-qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])
+qs.subscribe(["2330"], quote_type=[QuoteType.BidAsk])
 
 time.sleep(2)
 
@@ -66,21 +67,53 @@ print(
 # ============================================================================
 print("\n=== Example 3: Futures ===")
 
-# Subscribe to near-month TX futures
-contracts = [api.Contracts.Futures.TXF.TXFR1]
+# Subscribe to near-month TX futures. TXFR1 is a rolling alias; streaming
+# callbacks use the actual contract code from target_code, such as TXFG6.
+near_month = api.Contracts.Futures.TXF.TXFR1
+futures_code = getattr(near_month, "target_code", None) or near_month.code
+contract = api.Contracts.Futures.TXF[futures_code]
+print(f"  near-month alias {near_month.code} -> streaming contract {contract.code}")
 qs.subscribe(
-    contracts=contracts,
-    quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk],
+    contracts=[contract],
+    quote_type=[QuoteType.Tick, QuoteType.BidAsk],
 )
 
-time.sleep(2)
+baseline = qs.snapshots([contract.code])[0]
+baseline_volume = baseline.total_volume
+baseline_buy = baseline.buy_price
+baseline_sell = baseline.sell_price
+bidask_updated = False
+print(
+    f"  {futures_code}: baseline close={baseline.close}, "
+    f"buy={baseline.buy_price}, sell={baseline.sell_price}, "
+    f"vol={baseline_volume}"
+)
 
-for snap in qs.snapshots():
-    print(
-        f"  {snap.code}: close={snap.close}, "
-        f"buy={snap.buy_price}, sell={snap.sell_price}, "
-        f"vol={snap.total_volume}"
+latest = baseline
+for second in range(1, 6):
+    time.sleep(1)
+    latest = qs.snapshots([contract.code])[0]
+    volume_delta = latest.total_volume - baseline_volume
+    bidask_changed = (
+        latest.buy_price != baseline_buy or latest.sell_price != baseline_sell
     )
+    bidask_updated = bidask_updated or bidask_changed
+    print(
+        f"  +{second}s: close={latest.close}, "
+        f"buy={latest.buy_price}, sell={latest.sell_price}, "
+        f"vol={latest.total_volume} (delta={volume_delta}), "
+        f"bidask_changed={bidask_changed}"
+    )
+    if volume_delta > 0:
+        break
+
+if latest.total_volume == baseline_volume:
+    if bidask_updated:
+        print(
+            "  BidAsk updated, but no new futures tick observed during the 5-second window."
+        )
+    else:
+        print("  No futures Tick or BidAsk update observed during the 5-second window.")
 
 # ============================================================================
 # Example 4: User Callback
@@ -110,7 +143,7 @@ time.sleep(5)
 print("\n=== Example 5: Unsubscribe ===")
 
 # Unsubscribe BidAsk only, keep Tick
-qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])
+qs.unsubscribe(["2330"], quote_type=[QuoteType.BidAsk])
 print("Unsubscribed BidAsk for 2330, Tick still active")
 
 # Full unsubscribe

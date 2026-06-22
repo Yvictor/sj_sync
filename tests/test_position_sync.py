@@ -1,7 +1,7 @@
 """Tests for PositionSync real-time position tracking."""
 
 from unittest.mock import Mock
-from shioaji.constant import OrderState, Action, StockOrderCond
+from sj_sync.shioaji_compat import Action, OrderState, StockOrderCond
 
 from sj_sync.position_sync import PositionSync
 from sj_sync.models import FuturesPosition, StockPosition
@@ -50,7 +50,7 @@ class TestPositionSyncInitialization:
     def test_init_with_stock_positions(self, mock_api, sample_stock_pnl):
         """Test initialization with stock positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
@@ -72,7 +72,7 @@ class TestPositionSyncInitialization:
     def test_init_with_margin_trading(self, mock_api, sample_margin_pnl):
         """Test initialization with margin trading positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
@@ -91,7 +91,7 @@ class TestPositionSyncInitialization:
     def test_init_with_short_selling(self, mock_api, sample_short_pnl):
         """Test initialization with short selling positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
@@ -127,8 +127,8 @@ class TestPositionSyncInitialization:
     def test_list_positions_filter_by_account(self, mock_api, sample_stock_pnl):
         """Test filtering positions by account."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account1 = create_mock_account("9100", "ACC1", AccountType.Stock)
         account2 = create_mock_account("9100", "ACC2", AccountType.Stock)
@@ -200,7 +200,7 @@ class TestStockDealEvents:
     ):
         """Test adding to existing position (same direction)."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         # Set account before creating sync
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -226,7 +226,7 @@ class TestStockDealEvents:
     ):
         """Test reducing position (opposite direction)."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         # Set account before creating sync
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -250,7 +250,7 @@ class TestStockDealEvents:
     def test_close_position_exact_opposite(self, mock_api, sample_stock_pnl):
         """Test closing position when quantity becomes zero."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         # Set account before creating sync
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -295,7 +295,7 @@ class TestDayTrading:
     def test_day_trading_buy_then_sell(self, mock_api):
         """Test day trading: buy then sell same quantity."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.stock_account = account
@@ -322,7 +322,7 @@ class TestDayTrading:
     def test_day_trading_partial(self, mock_api):
         """Test partial day trading (buy 10, sell 7)."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.stock_account = account
@@ -349,7 +349,7 @@ class TestMarginAndShortSelling:
     def test_margin_and_cash_same_stock(self, mock_api):
         """Test that margin and cash positions of same stock are separate."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.stock_account = account
@@ -387,7 +387,7 @@ class TestMarginAndShortSelling:
     def test_short_selling_deal(self, mock_api, sample_short_deal):
         """Test short selling deal event."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.stock_account = account
@@ -410,7 +410,7 @@ class TestFuturesDealEvents:
     def test_new_futures_position_from_deal(self, mock_api, sample_futures_deal):
         """Test creating new futures position from deal."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Future)
         mock_api.futopt_account = account
@@ -433,7 +433,7 @@ class TestMultipleAccounts:
     def test_separate_accounts_separate_positions(self, mock_api):
         """Test that different accounts maintain separate positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account1 = create_mock_account("9100", "ACC1", AccountType.Stock)
         account2 = create_mock_account("9100", "ACC2", AccountType.Stock)
@@ -482,7 +482,7 @@ class TestEdgeCases:
 
     def test_user_callback_registration(self, mock_api):
         """Test that user callback can be registered and is called."""
-        from shioaji.constant import OrderState
+        from sj_sync.shioaji_compat import OrderState
 
         mock_api.list_positions.return_value = []
         sync = PositionSync(mock_api)
@@ -512,9 +512,9 @@ class TestEdgeCases:
 
     def test_user_callback_exception_handling(self, mock_api):
         """Test that exceptions in user callback are caught and logged."""
-        from shioaji.constant import OrderState
+        from sj_sync.shioaji_compat import OrderState
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         mock_api.list_positions.return_value = []
 
@@ -558,7 +558,7 @@ class TestSmartSync:
     def test_sync_threshold_disabled_always_use_local(self, mock_api, sample_stock_pnl):
         """Test sync_threshold=0 always uses local positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -585,7 +585,7 @@ class TestSmartSync:
     ):
         """Test using local positions within threshold after deal."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -615,7 +615,7 @@ class TestSmartSync:
     ):
         """Test querying API after threshold period."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
         import datetime
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -648,7 +648,7 @@ class TestSmartSync:
     ):
         """Test querying API when no previous deals recorded."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -674,8 +674,8 @@ class TestSmartSync:
     ):
         """Test background sync detects and updates inconsistent positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -720,7 +720,7 @@ class TestSmartSync:
     ):
         """Test futures positions are directly updated from API."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
         import datetime
 
         account = create_mock_account("9100", "FUTOPT", AccountType.Future)
@@ -755,7 +755,7 @@ class TestSmartSync:
     def test_api_query_failure_fallback_to_local(self, mock_api, sample_stock_pnl):
         """Test fallback to local positions when API query fails."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
         import datetime
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -798,7 +798,7 @@ class TestSmartSync:
     def test_get_default_account_only_futopt(self, mock_api):
         """Test _get_default_account when only futopt_account exists."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         futopt_account = create_mock_account("9100", "FUTOPT", AccountType.Future)
 
@@ -815,7 +815,7 @@ class TestSmartSync:
     def test_initialize_positions_api_error(self, mock_api):
         """Test _initialize_positions handles API errors gracefully."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -859,7 +859,7 @@ class TestSmartSync:
     ):
         """Test _background_check_and_sync handles exceptions gracefully."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
         import datetime
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -890,8 +890,8 @@ class TestSmartSync:
     def test_handle_inconsistencies_all_types(self, mock_api, sample_stock_pnl):
         """Test _handle_inconsistencies_stock with all inconsistency types."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
         import datetime
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -955,12 +955,12 @@ class TestSmartSync:
     ):
         """Test _load_and_sum_today_trades filters non-stock orders."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
         # Create mock trades with various edge cases
-        from shioaji.constant import Status
+        from sj_sync.shioaji_compat import Status
 
         # Trade 1: Filled stock order (should be included)
         trade1 = Mock()
@@ -1040,7 +1040,7 @@ class TestSmartSync:
     def test_sync_from_api_all_accounts(self, mock_api, sample_stock_pnl):
         """Test sync_from_api() without account parameter syncs all accounts."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         stock_account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [stock_account]
@@ -1071,7 +1071,7 @@ class TestSmartSync:
     def test_sync_from_api_specific_account(self, mock_api, sample_stock_pnl):
         """Test sync_from_api() with specific account parameter."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         stock_account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [stock_account]
@@ -1099,8 +1099,8 @@ class TestSmartSync:
     ):
         """Test that deals occurring during API query cause return of local positions."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.constant import OrderState
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import OrderState
         import datetime
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
@@ -1117,7 +1117,7 @@ class TestSmartSync:
         )
 
         # Add a local position different from API
-        from shioaji.constant import StockOrderCond
+        from sj_sync.shioaji_compat import StockOrderCond
 
         sync._stock_positions[account_key] = {
             ("2330", StockOrderCond.Cash): sync._stock_positions[account_key][
@@ -1231,8 +1231,8 @@ class TestYdOffsetExposure:
         """After initialization that computes yd_offset from today's trades,
         list_positions() returns positions with the calculated yd_offset_quantity."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
@@ -1252,7 +1252,7 @@ class TestYdOffsetExposure:
         sold_trade.order.order_cond = StockOrderCond.Cash
         sold_trade.order.action = Action.Sell
         sold_trade.status = Mock()
-        from shioaji.constant import Status
+        from sj_sync.shioaji_compat import Status
 
         sold_trade.status.status = Status.Filled
         sold_trade.status.deal_quantity = 3
@@ -1274,8 +1274,8 @@ class TestYdOffsetExposure:
         """Normal-trading opposite-direction deal updates yd_offset_quantity,
         and the public position reflects it."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
 
@@ -1312,8 +1312,8 @@ class TestYdOffsetExposure:
         is correctly 0 even when the position has no local entry."""
         import datetime
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -1352,9 +1352,9 @@ class TestYdOffsetExposure:
         trades — there is no misleading fallback to 0."""
         import datetime
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
-        from shioaji.constant import Status
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
+        from sj_sync.shioaji_compat import Status
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -1405,9 +1405,9 @@ class TestYdOffsetExposure:
         today's filled trades (not from any cached local value)."""
         import datetime
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
-        from shioaji.constant import Status
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
+        from sj_sync.shioaji_compat import Status
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -1456,8 +1456,8 @@ class TestYdOffsetExposure:
         internal state — and the deal-callback mutation must not retroactively
         change a previously-returned snapshot."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         pnl = Mock(spec=SjStockPosition)
@@ -1500,8 +1500,8 @@ class TestYdOffsetExposure:
         """Margin↔Short day trade offsets only TODAY's quantity. yesterday's
         position (and its yd_offset_quantity) must not change."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         # Yesterday's MarginTrading buy of 5
@@ -1544,7 +1544,7 @@ class TestYdOffsetExposure:
         remainder that creates a NEW opposite-direction position with
         yd_offset_quantity=0 (it cannot offset yesterday)."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
+        from sj_sync.shioaji_compat import AccountType
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         mock_api.list_accounts.return_value = [account]
@@ -1579,8 +1579,8 @@ class TestYdOffsetExposure:
         """When a normal-trading offset closes the position completely, the
         position is removed from local; no entry remains."""
         from tests.conftest import create_mock_account
-        from shioaji.account import AccountType
-        from shioaji.position import StockPosition as SjStockPosition
+        from sj_sync.shioaji_compat import AccountType
+        from sj_sync.shioaji_compat import SjStockPosition
 
         account = create_mock_account("9100", "1234567", AccountType.Stock)
         pnl = Mock(spec=SjStockPosition)
@@ -1627,3 +1627,49 @@ class TestYdOffsetExposure:
         reconstructed = StockPosition(**dumped)
         assert reconstructed.yd_remaining_quantity == 6
         assert reconstructed == original
+
+
+class TestNormalizeCompatibility:
+    def test_normalize_direction_supports_instances_attrs_and_legacy_lookup(
+        self, mock_api, monkeypatch
+    ):
+        class FakeAction:
+            Buy = "buy-attr"
+            Sell = "sell-attr"
+
+            def __class_getitem__(cls, key):
+                if key == "LegacyBuy":
+                    return "legacy-buy"
+                raise KeyError(key)
+
+        direction = FakeAction()
+        monkeypatch.setattr("sj_sync.position_sync.Action", FakeAction)
+
+        sync = PositionSync(mock_api)
+
+        assert sync._normalize_direction(direction) is direction
+        assert sync._normalize_direction("Buy") == "buy-attr"
+        assert sync._normalize_direction("sell") == "sell-attr"
+        assert sync._normalize_direction("LegacyBuy") == "legacy-buy"
+
+    def test_normalize_cond_supports_instances_attrs_legacy_lookup_and_default(
+        self, mock_api, monkeypatch
+    ):
+        class FakeStockOrderCond:
+            Cash = "cash-attr"
+            MarginTrading = "margin-attr"
+
+            def __class_getitem__(cls, key):
+                if key == "LegacyCond":
+                    return "legacy-cond"
+                raise KeyError(key)
+
+        cond = FakeStockOrderCond()
+        monkeypatch.setattr("sj_sync.position_sync.StockOrderCond", FakeStockOrderCond)
+
+        sync = PositionSync(mock_api)
+
+        assert sync._normalize_cond(cond) is cond
+        assert sync._normalize_cond("MarginTrading") == "margin-attr"
+        assert sync._normalize_cond("LegacyCond") == "legacy-cond"
+        assert sync._normalize_cond("InvalidCond") == "cash-attr"

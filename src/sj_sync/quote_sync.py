@@ -1,14 +1,22 @@
 """Real-time quote snapshot synchronization for Shioaji."""
 
 import datetime
+import inspect
 import time
-from typing import Callable, Dict, List, Optional, Set, Union
+from types import SimpleNamespace
+from typing import Callable, Dict, List, Optional, Set, Union, cast
 
 from loguru import logger
 
-import shioaji as sj
-from shioaji.constant import ChangeType, QuoteType, TickType
-from shioaji.data import Snapshot
+from .shioaji_compat import (
+    _SHIOAJI_VERSION,
+    ChangeType,
+    Contract,
+    QuoteType,
+    Snapshot,
+    TickType,
+    sj,
+)
 
 logger.add(
     "sj_sync.log",
@@ -73,22 +81,28 @@ class QuoteSync:
     def __init__(self, api: sj.Shioaji) -> None:
         self.api = api
         self._snapshots: Dict[str, Snapshot] = {}
-        self._contracts: Dict[str, sj.contracts.Contract] = {}
+        self._contracts: Dict[str, Contract] = {}
         self._subscribed: Dict[str, Set[QuoteType]] = {}
         self._user_tick_stk_callback: Optional[Callable] = None
         self._user_tick_fop_callback: Optional[Callable] = None
         self._user_bidask_stk_callback: Optional[Callable] = None
         self._user_bidask_fop_callback: Optional[Callable] = None
 
-        api.quote.set_on_tick_stk_v1_callback(self._on_tick_stk)
-        api.quote.set_on_tick_fop_v1_callback(self._on_tick_fop)
-        api.quote.set_on_bidask_stk_v1_callback(self._on_bidask_stk)
-        api.quote.set_on_bidask_fop_v1_callback(self._on_bidask_fop)
+        if _SHIOAJI_VERSION >= (1, 5):
+            api.set_on_tick_stk_v1_callback(self._on_tick_stk_v1)
+            api.set_on_tick_fop_v1_callback(self._on_tick_fop_v1)
+            api.set_on_bidask_stk_v1_callback(self._on_bidask_stk_v1)
+            api.set_on_bidask_fop_v1_callback(self._on_bidask_fop_v1)
+        else:
+            api.quote.set_on_tick_stk_v1_callback(self._on_tick_stk)
+            api.quote.set_on_tick_fop_v1_callback(self._on_tick_fop)
+            api.quote.set_on_bidask_stk_v1_callback(self._on_bidask_stk)
+            api.quote.set_on_bidask_fop_v1_callback(self._on_bidask_fop)
 
     def subscribe(
         self,
         codes: Optional[List[str]] = None,
-        contracts: Optional[List[sj.contracts.Contract]] = None,
+        contracts: Optional[List[Contract]] = None,
         quote_type: Optional[List[QuoteType]] = None,
     ) -> None:
         """Subscribe to streaming quotes for given codes/contracts.
@@ -104,7 +118,7 @@ class QuoteSync:
         if quote_type is None:
             quote_type = [QuoteType.Tick]
 
-        resolved: List[sj.contracts.Contract] = []
+        resolved: List[Contract] = []
         if contracts:
             resolved.extend(contracts)
         if codes:
@@ -122,7 +136,7 @@ class QuoteSync:
                 try:
                     snaps = self.api.snapshots(batch)
                     for snap in snaps:
-                        self._snapshots[snap.code] = snap
+                        self._snapshots[snap.code] = self._snapshot_copy(snap)
                 except Exception as e:
                     codes_str = [c.code for c in batch]
                     logger.warning(
@@ -144,7 +158,7 @@ class QuoteSync:
 
             for qt in new_types:
                 self._rate_limit(rate_limit_timestamps)
-                self.api.quote.subscribe(contract, quote_type=qt)
+                self._subscribe_quote(contract, qt)
                 rate_limit_timestamps.append(time.monotonic())
 
             self._subscribed[code] = existing | set(quote_type)
@@ -176,7 +190,7 @@ class QuoteSync:
             for qt in types_to_remove:
                 if qt in self._subscribed[code]:
                     self._rate_limit(rate_limit_timestamps)
-                    self.api.quote.unsubscribe(contract, quote_type=qt)
+                    self._unsubscribe_quote(contract, qt)
                     rate_limit_timestamps.append(time.monotonic())
 
             self._subscribed[code] -= types_to_remove
@@ -188,7 +202,7 @@ class QuoteSync:
 
     def snapshots(
         self,
-        contracts: Optional[Union[List[sj.contracts.Contract], List[str]]] = None,
+        contracts: Optional[Union[List[Contract], List[str]]] = None,
     ) -> List[Snapshot]:
         """Get snapshots. Returns live mutable references.
 
@@ -221,6 +235,22 @@ class QuoteSync:
         self._user_bidask_fop_callback = callback
 
     # -- Internal callbacks --
+
+    @staticmethod
+    def _quote_exchange(data):
+        return getattr(data, "exchange", None)
+
+    def _on_tick_stk_v1(self, tick) -> None:
+        self._on_tick_stk(self._quote_exchange(tick), tick)
+
+    def _on_tick_fop_v1(self, tick) -> None:
+        self._on_tick_fop(self._quote_exchange(tick), tick)
+
+    def _on_bidask_stk_v1(self, bidask) -> None:
+        self._on_bidask_stk(self._quote_exchange(bidask), bidask)
+
+    def _on_bidask_fop_v1(self, bidask) -> None:
+        self._on_bidask_fop(self._quote_exchange(bidask), bidask)
 
     def _on_tick_stk(self, exchange, tick) -> None:
         if tick.simtrade:
@@ -342,7 +372,25 @@ class QuoteSync:
 
     # -- Helpers --
 
-    def _resolve_contract(self, code: str) -> sj.contracts.Contract:
+    def _subscribe_quote(self, contract: Contract, quote_type: QuoteType) -> None:
+        """Subscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
+        subscribe = self._get_api_quote_method("subscribe")
+        subscribe(contract, quote_type=quote_type)
+
+    def _unsubscribe_quote(self, contract: Contract, quote_type: QuoteType) -> None:
+        """Unsubscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
+        unsubscribe = self._get_api_quote_method("unsubscribe")
+        unsubscribe(contract, quote_type=quote_type)
+
+    def _get_api_quote_method(self, name: str) -> Callable:
+        """Return top-level 1.5 quote method, or legacy api.quote method."""
+        try:
+            inspect.getattr_static(self.api, name)
+        except AttributeError:
+            return getattr(self.api.quote, name)
+        return getattr(self.api, name)
+
+    def _resolve_contract(self, code: str) -> Contract:
         """Resolve a code string to a Contract object."""
         for collection in [
             self.api.Contracts.Stocks,
@@ -358,31 +406,64 @@ class QuoteSync:
         raise ValueError(f"Cannot resolve contract for code: {code}")
 
     @staticmethod
+    def _snapshot_copy(snapshot: Snapshot) -> Snapshot:
+        return cast(
+            Snapshot,
+            SimpleNamespace(
+                ts=snapshot.ts,
+                code=snapshot.code,
+                exchange=snapshot.exchange,
+                open=snapshot.open,
+                high=snapshot.high,
+                low=snapshot.low,
+                close=snapshot.close,
+                tick_type=snapshot.tick_type,
+                change_price=snapshot.change_price,
+                change_rate=snapshot.change_rate,
+                change_type=snapshot.change_type,
+                average_price=snapshot.average_price,
+                volume=snapshot.volume,
+                total_volume=snapshot.total_volume,
+                amount=snapshot.amount,
+                total_amount=snapshot.total_amount,
+                yesterday_volume=snapshot.yesterday_volume,
+                buy_price=snapshot.buy_price,
+                buy_volume=snapshot.buy_volume,
+                sell_price=snapshot.sell_price,
+                sell_volume=snapshot.sell_volume,
+                volume_ratio=snapshot.volume_ratio,
+            ),
+        )
+
+    @staticmethod
     def _empty_snapshot(code: str = "") -> Snapshot:
         """Create an empty Snapshot with default values."""
-        return Snapshot(
-            ts=0,
-            code=code,
-            exchange="",
-            open=0.0,
-            high=0.0,
-            low=0.0,
-            close=0.0,
-            tick_type=TickType.No,
-            change_price=0.0,
-            change_rate=0.0,
-            change_type=ChangeType.Unchanged,
-            average_price=0.0,
-            volume=0,
-            total_volume=0,
-            amount=0,
-            total_amount=0,
-            yesterday_volume=0.0,
-            buy_price=0.0,
-            buy_volume=0.0,
-            sell_price=0.0,
-            sell_volume=0,
-            volume_ratio=0.0,
+        return cast(
+            Snapshot,
+            SimpleNamespace(
+                ts=0,
+                code=code,
+                exchange="",
+                open=0.0,
+                high=0.0,
+                low=0.0,
+                close=0.0,
+                tick_type=TickType.No,
+                change_price=0.0,
+                change_rate=0.0,
+                change_type=ChangeType.Unchanged,
+                average_price=0.0,
+                volume=0,
+                total_volume=0,
+                amount=0,
+                total_amount=0,
+                yesterday_volume=0.0,
+                buy_price=0.0,
+                buy_volume=0.0,
+                sell_price=0.0,
+                sell_volume=0,
+                volume_ratio=0.0,
+            ),
         )
 
     @staticmethod
