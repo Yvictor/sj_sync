@@ -35,7 +35,7 @@ if _SHIOAJI_VERSION >= (1, 5):
     ChangeType = sj.ChangeType
     QuoteType = sj.QuoteType
     TickType = sj.TickType
-else:
+else:  # pragma: no cover - covered by the Shioaji 1.3.3 compatibility test run.
     from shioaji.account import Account, AccountType
     from shioaji.contracts import Contract
     from shioaji.constant import (

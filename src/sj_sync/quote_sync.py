@@ -342,16 +342,12 @@ class QuoteSync:
 
     # -- Helpers --
 
-    def _subscribe_quote(
-        self, contract: Contract, quote_type: QuoteType
-    ) -> None:
+    def _subscribe_quote(self, contract: Contract, quote_type: QuoteType) -> None:
         """Subscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
         subscribe = self._get_api_quote_method("subscribe")
         subscribe(contract, quote_type=quote_type)
 
-    def _unsubscribe_quote(
-        self, contract: Contract, quote_type: QuoteType
-    ) -> None:
+    def _unsubscribe_quote(self, contract: Contract, quote_type: QuoteType) -> None:
         """Unsubscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
         unsubscribe = self._get_api_quote_method("unsubscribe")
         unsubscribe(contract, quote_type=quote_type)
@@ -382,30 +378,33 @@ class QuoteSync:
     @staticmethod
     def _empty_snapshot(code: str = "") -> Snapshot:
         """Create an empty Snapshot with default values."""
-        return cast(Snapshot, SimpleNamespace(
-            ts=0,
-            code=code,
-            exchange="",
-            open=0.0,
-            high=0.0,
-            low=0.0,
-            close=0.0,
-            tick_type=TickType.No,
-            change_price=0.0,
-            change_rate=0.0,
-            change_type=ChangeType.Unchanged,
-            average_price=0.0,
-            volume=0,
-            total_volume=0,
-            amount=0,
-            total_amount=0,
-            yesterday_volume=0.0,
-            buy_price=0.0,
-            buy_volume=0.0,
-            sell_price=0.0,
-            sell_volume=0,
-            volume_ratio=0.0,
-        ))
+        return cast(
+            Snapshot,
+            SimpleNamespace(
+                ts=0,
+                code=code,
+                exchange="",
+                open=0.0,
+                high=0.0,
+                low=0.0,
+                close=0.0,
+                tick_type=TickType.No,
+                change_price=0.0,
+                change_rate=0.0,
+                change_type=ChangeType.Unchanged,
+                average_price=0.0,
+                volume=0,
+                total_volume=0,
+                amount=0,
+                total_amount=0,
+                yesterday_volume=0.0,
+                buy_price=0.0,
+                buy_volume=0.0,
+                sell_price=0.0,
+                sell_volume=0,
+                volume_ratio=0.0,
+            ),
+        )
 
     @staticmethod
     def _rate_limit(timestamps: List[float]) -> None:
