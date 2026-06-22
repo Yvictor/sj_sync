@@ -1,14 +1,14 @@
 """Real-time quote snapshot synchronization for Shioaji."""
 
 import datetime
+import inspect
 import time
-from typing import Callable, Dict, List, Optional, Set, Union
+from types import SimpleNamespace
+from typing import Callable, Dict, List, Optional, Set, Union, cast
 
 from loguru import logger
 
-import shioaji as sj
-from shioaji.constant import ChangeType, QuoteType, TickType
-from shioaji.data import Snapshot
+from .shioaji_compat import ChangeType, Contract, QuoteType, Snapshot, TickType, sj
 
 logger.add(
     "sj_sync.log",
@@ -73,7 +73,7 @@ class QuoteSync:
     def __init__(self, api: sj.Shioaji) -> None:
         self.api = api
         self._snapshots: Dict[str, Snapshot] = {}
-        self._contracts: Dict[str, sj.contracts.Contract] = {}
+        self._contracts: Dict[str, Contract] = {}
         self._subscribed: Dict[str, Set[QuoteType]] = {}
         self._user_tick_stk_callback: Optional[Callable] = None
         self._user_tick_fop_callback: Optional[Callable] = None
@@ -88,7 +88,7 @@ class QuoteSync:
     def subscribe(
         self,
         codes: Optional[List[str]] = None,
-        contracts: Optional[List[sj.contracts.Contract]] = None,
+        contracts: Optional[List[Contract]] = None,
         quote_type: Optional[List[QuoteType]] = None,
     ) -> None:
         """Subscribe to streaming quotes for given codes/contracts.
@@ -104,7 +104,7 @@ class QuoteSync:
         if quote_type is None:
             quote_type = [QuoteType.Tick]
 
-        resolved: List[sj.contracts.Contract] = []
+        resolved: List[Contract] = []
         if contracts:
             resolved.extend(contracts)
         if codes:
@@ -144,7 +144,7 @@ class QuoteSync:
 
             for qt in new_types:
                 self._rate_limit(rate_limit_timestamps)
-                self.api.quote.subscribe(contract, quote_type=qt)
+                self._subscribe_quote(contract, qt)
                 rate_limit_timestamps.append(time.monotonic())
 
             self._subscribed[code] = existing | set(quote_type)
@@ -176,7 +176,7 @@ class QuoteSync:
             for qt in types_to_remove:
                 if qt in self._subscribed[code]:
                     self._rate_limit(rate_limit_timestamps)
-                    self.api.quote.unsubscribe(contract, quote_type=qt)
+                    self._unsubscribe_quote(contract, qt)
                     rate_limit_timestamps.append(time.monotonic())
 
             self._subscribed[code] -= types_to_remove
@@ -188,7 +188,7 @@ class QuoteSync:
 
     def snapshots(
         self,
-        contracts: Optional[Union[List[sj.contracts.Contract], List[str]]] = None,
+        contracts: Optional[Union[List[Contract], List[str]]] = None,
     ) -> List[Snapshot]:
         """Get snapshots. Returns live mutable references.
 
@@ -342,7 +342,29 @@ class QuoteSync:
 
     # -- Helpers --
 
-    def _resolve_contract(self, code: str) -> sj.contracts.Contract:
+    def _subscribe_quote(
+        self, contract: Contract, quote_type: QuoteType
+    ) -> None:
+        """Subscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
+        subscribe = self._get_api_quote_method("subscribe")
+        subscribe(contract, quote_type=quote_type)
+
+    def _unsubscribe_quote(
+        self, contract: Contract, quote_type: QuoteType
+    ) -> None:
+        """Unsubscribe using Shioaji 1.5+ API, falling back to 1.3.x API."""
+        unsubscribe = self._get_api_quote_method("unsubscribe")
+        unsubscribe(contract, quote_type=quote_type)
+
+    def _get_api_quote_method(self, name: str) -> Callable:
+        """Return top-level 1.5 quote method, or legacy api.quote method."""
+        try:
+            inspect.getattr_static(self.api, name)
+        except AttributeError:
+            return getattr(self.api.quote, name)
+        return getattr(self.api, name)
+
+    def _resolve_contract(self, code: str) -> Contract:
         """Resolve a code string to a Contract object."""
         for collection in [
             self.api.Contracts.Stocks,
@@ -360,7 +382,7 @@ class QuoteSync:
     @staticmethod
     def _empty_snapshot(code: str = "") -> Snapshot:
         """Create an empty Snapshot with default values."""
-        return Snapshot(
+        return cast(Snapshot, SimpleNamespace(
             ts=0,
             code=code,
             exchange="",
@@ -383,7 +405,7 @@ class QuoteSync:
             sell_price=0.0,
             sell_volume=0,
             volume_ratio=0.0,
-        )
+        ))
 
     @staticmethod
     def _rate_limit(timestamps: List[float]) -> None:

@@ -105,7 +105,7 @@ Register your own callback to receive deal events while maintaining automatic po
 
 ```python
 from sj_sync import PositionSync, OrderDealCallback
-from shioaji.constant import OrderState
+from sj_sync.shioaji_compat import OrderState
 
 # Create PositionSync instance
 sync = PositionSync(api, sync_threshold=30)

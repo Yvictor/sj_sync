@@ -2,11 +2,11 @@
 
 import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from shioaji.constant import ChangeType, QuoteType, TickType
-from shioaji.data import Snapshot
+from sj_sync.shioaji_compat import ChangeType, QuoteType, TickType
 
 from sj_sync.quote_sync import QuoteSync, _datetime_to_ns
 
@@ -62,6 +62,35 @@ def make_bidask(code: str, **overrides) -> Mock:
     return bidask
 
 
+def make_snapshot(code: str = "", **overrides):
+    defaults = dict(
+        ts=0,
+        code=code,
+        exchange="",
+        open=0.0,
+        high=0.0,
+        low=0.0,
+        close=0.0,
+        tick_type=TickType.No,
+        change_price=0.0,
+        change_rate=0.0,
+        change_type=ChangeType.Unchanged,
+        average_price=0.0,
+        volume=0,
+        total_volume=0,
+        amount=0,
+        total_amount=0,
+        yesterday_volume=0.0,
+        buy_price=0.0,
+        buy_volume=0.0,
+        sell_price=0.0,
+        sell_volume=0,
+        volume_ratio=0.0,
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
 @pytest.fixture
 def mock_quote_api():
     """Mock Shioaji API with quote-related methods."""
@@ -102,12 +131,13 @@ def mock_quote_api():
     def mock_snapshots(contracts):
         result = []
         for c in contracts:
-            snap = Snapshot()
-            snap.code = c.code
-            snap.close = 600.0
-            snap.open = 595.0
-            snap.high = 605.0
-            snap.low = 590.0
+            snap = make_snapshot(
+                c.code,
+                close=600.0,
+                open=595.0,
+                high=605.0,
+                low=590.0,
+            )
             result.append(snap)
         return result
 
@@ -169,6 +199,16 @@ class TestQuoteSyncSubscribe:
             contract, quote_type=QuoteType.Tick
         )
 
+    def test_subscribe_uses_top_level_api_when_available(self, mock_quote_api):
+        mock_quote_api.subscribe = Mock()
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        contract = mock_quote_api.Contracts.Stocks.get("2330")
+        mock_quote_api.subscribe.assert_called_once_with(
+            contract, quote_type=QuoteType.Tick
+        )
+        mock_quote_api.quote.subscribe.assert_not_called()
+
     def test_subscribe_multiple_codes(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330", "2317"])
@@ -185,7 +225,7 @@ class TestQuoteSyncSubscribe:
         qs = QuoteSync(mock_quote_api)
         contract = make_contract("CUSTOM")
         # Need to make api.snapshots handle this too
-        mock_quote_api.snapshots.side_effect = lambda cs: [Snapshot() for _ in cs]
+        mock_quote_api.snapshots.side_effect = lambda cs: [make_snapshot() for _ in cs]
         qs.subscribe(codes=["2330"], contracts=[contract])
         assert mock_quote_api.quote.subscribe.call_count == 2
 
@@ -282,6 +322,18 @@ class TestQuoteSyncUnsubscribe:
         assert len(qs.snapshots(["2330"])) == 1
         mock_quote_api.quote.unsubscribe.assert_called_once()
 
+    def test_unsubscribe_uses_top_level_api_when_available(self, mock_quote_api):
+        mock_quote_api.subscribe = Mock()
+        mock_quote_api.unsubscribe = Mock()
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        qs.unsubscribe(["2330"])
+        contract = mock_quote_api.Contracts.Stocks.get("2330")
+        mock_quote_api.unsubscribe.assert_called_once_with(
+            contract, quote_type=QuoteType.Tick
+        )
+        mock_quote_api.quote.unsubscribe.assert_not_called()
+
     def test_unsubscribe_unknown_code_no_error(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.unsubscribe(["UNKNOWN"])  # should not raise
@@ -325,7 +377,7 @@ class TestQuoteSyncSnapshots:
         qs.subscribe(codes=["2330"])
         result = qs.snapshots(["2330"])
         assert len(result) == 1
-        assert isinstance(result[0], Snapshot)
+        assert result[0].code == "2330"
 
     def test_snapshots_missing_returns_empty(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
