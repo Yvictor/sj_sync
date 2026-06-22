@@ -67,16 +67,22 @@ print(
 # ============================================================================
 print("\n=== Example 3: Futures ===")
 
-# Subscribe to near-month TX futures
-contracts = [api.Contracts.Futures.TXF.TXFR1]
-futures_code = contracts[0].code
+# Subscribe to near-month TX futures. TXFR1 is a rolling alias; streaming
+# callbacks use the actual contract code from target_code, such as TXFG6.
+near_month = api.Contracts.Futures.TXF.TXFR1
+futures_code = getattr(near_month, "target_code", None) or near_month.code
+contract = api.Contracts.Futures.TXF[futures_code]
+print(f"  near-month alias {near_month.code} -> streaming contract {contract.code}")
 qs.subscribe(
-    contracts=contracts,
+    contracts=[contract],
     quote_type=[QuoteType.Tick, QuoteType.BidAsk],
 )
 
-baseline = qs.snapshots([futures_code])[0]
+baseline = qs.snapshots([contract.code])[0]
 baseline_volume = baseline.total_volume
+baseline_buy = baseline.buy_price
+baseline_sell = baseline.sell_price
+bidask_updated = False
 print(
     f"  {futures_code}: baseline close={baseline.close}, "
     f"buy={baseline.buy_price}, sell={baseline.sell_price}, "
@@ -86,18 +92,28 @@ print(
 latest = baseline
 for second in range(1, 6):
     time.sleep(1)
-    latest = qs.snapshots([futures_code])[0]
+    latest = qs.snapshots([contract.code])[0]
     volume_delta = latest.total_volume - baseline_volume
+    bidask_changed = (
+        latest.buy_price != baseline_buy or latest.sell_price != baseline_sell
+    )
+    bidask_updated = bidask_updated or bidask_changed
     print(
         f"  +{second}s: close={latest.close}, "
         f"buy={latest.buy_price}, sell={latest.sell_price}, "
-        f"vol={latest.total_volume} (delta={volume_delta})"
+        f"vol={latest.total_volume} (delta={volume_delta}), "
+        f"bidask_changed={bidask_changed}"
     )
     if volume_delta > 0:
         break
 
 if latest.total_volume == baseline_volume:
-    print("  No new futures tick observed during the 5-second window.")
+    if bidask_updated:
+        print(
+            "  BidAsk updated, but no new futures tick observed during the 5-second window."
+        )
+    else:
+        print("  No futures Tick or BidAsk update observed during the 5-second window.")
 
 # ============================================================================
 # Example 4: User Callback

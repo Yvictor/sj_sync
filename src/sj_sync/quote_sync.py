@@ -136,7 +136,7 @@ class QuoteSync:
                 try:
                     snaps = self.api.snapshots(batch)
                     for snap in snaps:
-                        self._snapshots[snap.code] = snap
+                        self._snapshots[snap.code] = self._snapshot_copy(snap)
                 except Exception as e:
                     codes_str = [c.code for c in batch]
                     logger.warning(
@@ -404,6 +404,36 @@ class QuoteSync:
             except (KeyError, IndexError, AttributeError):
                 continue
         raise ValueError(f"Cannot resolve contract for code: {code}")
+
+    @staticmethod
+    def _snapshot_copy(snapshot: Snapshot) -> Snapshot:
+        return cast(
+            Snapshot,
+            SimpleNamespace(
+                ts=snapshot.ts,
+                code=snapshot.code,
+                exchange=snapshot.exchange,
+                open=snapshot.open,
+                high=snapshot.high,
+                low=snapshot.low,
+                close=snapshot.close,
+                tick_type=snapshot.tick_type,
+                change_price=snapshot.change_price,
+                change_rate=snapshot.change_rate,
+                change_type=snapshot.change_type,
+                average_price=snapshot.average_price,
+                volume=snapshot.volume,
+                total_volume=snapshot.total_volume,
+                amount=snapshot.amount,
+                total_amount=snapshot.total_amount,
+                yesterday_volume=snapshot.yesterday_volume,
+                buy_price=snapshot.buy_price,
+                buy_volume=snapshot.buy_volume,
+                sell_price=snapshot.sell_price,
+                sell_volume=snapshot.sell_volume,
+                volume_ratio=snapshot.volume_ratio,
+            ),
+        )
 
     @staticmethod
     def _empty_snapshot(code: str = "") -> Snapshot:

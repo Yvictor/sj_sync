@@ -252,6 +252,20 @@ class TestQuoteSyncSubscribe:
         assert snap is not None
         assert snap.code == "2330"
 
+    def test_subscribe_stores_mutable_snapshot_copy(self, mock_quote_api):
+        native_snapshot = make_snapshot("2330", close=600.0)
+        mock_quote_api.snapshots.return_value = [native_snapshot]
+        mock_quote_api.snapshots.side_effect = None
+
+        qs = QuoteSync(mock_quote_api)
+        qs.subscribe(codes=["2330"])
+        stored = qs.snapshots(["2330"])[0]
+
+        assert stored is not native_snapshot
+        stored.close = 601.0
+        assert native_snapshot.close == 600.0
+        assert stored.close == 601.0
+
     def test_subscribe_calls_api_quote_subscribe(self, mock_quote_api):
         qs = QuoteSync(mock_quote_api)
         qs.subscribe(codes=["2330"])
