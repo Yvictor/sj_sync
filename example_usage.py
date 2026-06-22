@@ -1,13 +1,25 @@
 """Example usage of PositionSync for real-time position tracking."""
 
+import atexit
+import os
+
 import shioaji as sj
+from dotenv import load_dotenv
+from loguru import logger
 from sj_sync import PositionSync
 from sj_sync.shioaji_compat import OrderState
 from sj_sync.models import StockPosition
 
+load_dotenv()
+logger.remove()
+
 # Initialize Shioaji API
 api = sj.Shioaji()
-api.login("YOUR_API_KEY", "YOUR_SECRET_KEY")
+api.login(
+    api_key=os.environ["SJ_API_KEY"],
+    secret_key=os.environ["SJ_SEC_KEY"],
+)
+atexit.register(api.logout)
 
 # ============================================================================
 # Example 1: Basic Usage (Original Behavior)
