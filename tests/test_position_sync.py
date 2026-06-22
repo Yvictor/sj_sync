@@ -1627,3 +1627,49 @@ class TestYdOffsetExposure:
         reconstructed = StockPosition(**dumped)
         assert reconstructed.yd_remaining_quantity == 6
         assert reconstructed == original
+
+
+class TestNormalizeCompatibility:
+    def test_normalize_direction_supports_instances_attrs_and_legacy_lookup(
+        self, mock_api, monkeypatch
+    ):
+        class FakeAction:
+            Buy = "buy-attr"
+            Sell = "sell-attr"
+
+            def __class_getitem__(cls, key):
+                if key == "LegacyBuy":
+                    return "legacy-buy"
+                raise KeyError(key)
+
+        direction = FakeAction()
+        monkeypatch.setattr("sj_sync.position_sync.Action", FakeAction)
+
+        sync = PositionSync(mock_api)
+
+        assert sync._normalize_direction(direction) is direction
+        assert sync._normalize_direction("Buy") == "buy-attr"
+        assert sync._normalize_direction("sell") == "sell-attr"
+        assert sync._normalize_direction("LegacyBuy") == "legacy-buy"
+
+    def test_normalize_cond_supports_instances_attrs_legacy_lookup_and_default(
+        self, mock_api, monkeypatch
+    ):
+        class FakeStockOrderCond:
+            Cash = "cash-attr"
+            MarginTrading = "margin-attr"
+
+            def __class_getitem__(cls, key):
+                if key == "LegacyCond":
+                    return "legacy-cond"
+                raise KeyError(key)
+
+        cond = FakeStockOrderCond()
+        monkeypatch.setattr("sj_sync.position_sync.StockOrderCond", FakeStockOrderCond)
+
+        sync = PositionSync(mock_api)
+
+        assert sync._normalize_cond(cond) is cond
+        assert sync._normalize_cond("MarginTrading") == "margin-attr"
+        assert sync._normalize_cond("LegacyCond") == "legacy-cond"
+        assert sync._normalize_cond("InvalidCond") == "cash-attr"
