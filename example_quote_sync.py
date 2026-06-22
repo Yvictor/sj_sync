@@ -7,6 +7,7 @@ import shioaji as sj
 from dotenv import load_dotenv
 
 from sj_sync import QuoteSync
+from sj_sync.shioaji_compat import QuoteType
 
 load_dotenv()
 
@@ -49,7 +50,7 @@ print(f"\nFiltered (2330): close={filtered[0].close}")
 print("\n=== Example 2: Tick + BidAsk ===")
 
 # Add BidAsk to already-subscribed code (delta — only subscribes BidAsk)
-qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])
+qs.subscribe(["2330"], quote_type=[QuoteType.BidAsk])
 
 time.sleep(2)
 
@@ -70,7 +71,7 @@ print("\n=== Example 3: Futures ===")
 contracts = [api.Contracts.Futures.TXF.TXFR1]
 qs.subscribe(
     contracts=contracts,
-    quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk],
+    quote_type=[QuoteType.Tick, QuoteType.BidAsk],
 )
 
 time.sleep(2)
@@ -110,7 +111,7 @@ time.sleep(5)
 print("\n=== Example 5: Unsubscribe ===")
 
 # Unsubscribe BidAsk only, keep Tick
-qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])
+qs.unsubscribe(["2330"], quote_type=[QuoteType.BidAsk])
 print("Unsubscribed BidAsk for 2330, Tick still active")
 
 # Full unsubscribe

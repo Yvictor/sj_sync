@@ -2,6 +2,7 @@
 
 import shioaji as sj
 from sj_sync import PositionSync
+from sj_sync.shioaji_compat import OrderState
 from sj_sync.models import StockPosition
 
 # Initialize Shioaji API
@@ -139,12 +140,14 @@ sync_callback = PositionSync(api, sync_threshold=30)
 # Define your custom callback
 def my_deal_callback(state, data):
     """Custom callback to handle deal events."""
-    from shioaji.constant import OrderState
-
     if state == OrderState.StockDeal:
-        print(f"Stock deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}")
+        print(
+            f"Stock deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}"
+        )
     elif state == OrderState.FuturesDeal:
-        print(f"Futures deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}")
+        print(
+            f"Futures deal: {data.get('code')} {data.get('action')} {data.get('quantity')} @ {data.get('price')}"
+        )
 
     # You can add your custom logic here
     # - Send notifications

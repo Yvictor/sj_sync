@@ -176,6 +176,7 @@ sync.sync_from_api(account=api.stock_account)
 ```python
 import shioaji as sj
 from sj_sync import QuoteSync
+from sj_sync.shioaji_compat import QuoteType
 
 api = sj.Shioaji()
 api.login("YOUR_API_KEY", "YOUR_SECRET_KEY")
@@ -187,7 +188,7 @@ qs = QuoteSync(api)
 qs.subscribe(["2330", "2317"])
 
 # 訂閱 Tick + BidAsk 取得即時買賣價
-qs.subscribe(["2330"], quote_type=[sj.constant.QuoteType.Tick, sj.constant.QuoteType.BidAsk])
+qs.subscribe(["2330"], quote_type=[QuoteType.Tick, QuoteType.BidAsk])
 
 # 本地查詢快照（零 API 呼叫）
 all_snaps = qs.snapshots()              # 所有已訂閱
@@ -195,7 +196,7 @@ filtered = qs.snapshots(["2330"])       # 依代碼篩選
 
 # 取消訂閱
 qs.unsubscribe(["2317"])                                        # 所有類型
-qs.unsubscribe(["2330"], quote_type=[sj.constant.QuoteType.BidAsk])  # 部分取消
+qs.unsubscribe(["2330"], quote_type=[QuoteType.BidAsk])  # 部分取消
 ```
 
 **使用者回報：**
