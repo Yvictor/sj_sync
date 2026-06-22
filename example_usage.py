@@ -1,6 +1,5 @@
 """Example usage of PositionSync for real-time position tracking."""
 
-import atexit
 import os
 
 import shioaji as sj
@@ -19,7 +18,6 @@ api.login(
     api_key=os.environ["SJ_API_KEY"],
     secret_key=os.environ["SJ_SEC_KEY"],
 )
-atexit.register(api.logout)
 
 # ============================================================================
 # Example 1: Basic Usage (Original Behavior)
@@ -179,3 +177,6 @@ print("Custom callback registered. Positions auto-sync + custom notifications en
 # 3. You can query updated positions anytime
 positions = sync_callback.list_positions()
 print(f"Current positions: {len(positions)}")
+
+# Cleanup
+api.logout()
