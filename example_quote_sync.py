@@ -69,19 +69,35 @@ print("\n=== Example 3: Futures ===")
 
 # Subscribe to near-month TX futures
 contracts = [api.Contracts.Futures.TXF.TXFR1]
+futures_code = contracts[0].code
 qs.subscribe(
     contracts=contracts,
     quote_type=[QuoteType.Tick, QuoteType.BidAsk],
 )
 
-time.sleep(2)
+baseline = qs.snapshots([futures_code])[0]
+baseline_volume = baseline.total_volume
+print(
+    f"  {futures_code}: baseline close={baseline.close}, "
+    f"buy={baseline.buy_price}, sell={baseline.sell_price}, "
+    f"vol={baseline_volume}"
+)
 
-for snap in qs.snapshots():
+latest = baseline
+for second in range(1, 6):
+    time.sleep(1)
+    latest = qs.snapshots([futures_code])[0]
+    volume_delta = latest.total_volume - baseline_volume
     print(
-        f"  {snap.code}: close={snap.close}, "
-        f"buy={snap.buy_price}, sell={snap.sell_price}, "
-        f"vol={snap.total_volume}"
+        f"  +{second}s: close={latest.close}, "
+        f"buy={latest.buy_price}, sell={latest.sell_price}, "
+        f"vol={latest.total_volume} (delta={volume_delta})"
     )
+    if volume_delta > 0:
+        break
+
+if latest.total_volume == baseline_volume:
+    print("  No new futures tick observed during the 5-second window.")
 
 # ============================================================================
 # Example 4: User Callback
