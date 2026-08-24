@@ -337,10 +337,15 @@ def test_cancelled_trade_does_not_regress_on_an_older_order_report(mock_api):
 
     api_callback(OrderState.StockOrder, new_event)
     api_callback(OrderState.StockOrder, cancel_event)
-    api_callback(OrderState.StockOrder, new_event)
+    stale_event = deepcopy(new_event)
+    stale_event["operation"]["op_type"] = "UpdatePrice"
+    stale_event["status"]["exchange_ts"] -= 1
+    stale_event["status"]["modified_price"] = 99.0
+    api_callback(OrderState.StockOrder, stale_event)
 
     assert native_trade.status.status == Status.Cancelled
     assert native_trade.status.cancel_quantity == 2
+    assert native_trade.order.price == 100.0
 
 
 def test_close_stops_unresolved_order_classification(mock_api):
@@ -356,6 +361,19 @@ def test_close_stops_unresolved_order_classification(mock_api):
 
     assert sync.list_trades() == []
     assert observed == []
+
+
+def test_context_manager_closes_callback_processing(mock_api):
+    native_trade = create_native_trade()
+    mock_api.list_trades.return_value = [native_trade]
+
+    with PositionSync(mock_api) as sync:
+        assert sync.list_trades() == [native_trade]
+        api_callback = mock_api.set_order_callback.call_args.args[0]
+
+    api_callback(OrderState.StockOrder, create_stock_order_event())
+
+    assert native_trade.status.status == Status.PendingSubmit
 
 
 def test_initialization_tracks_trades_after_one_status_reconciliation(mock_api):
@@ -396,6 +414,26 @@ def test_manual_reconciliation_discards_still_unresolved_orders(mock_api):
     time.sleep(1.05)
 
     assert sync.list_trades() == []
+    sync.close()
+
+
+def test_manual_reconciliation_discards_unresolved_deals_and_updates(mock_api):
+    mock_api.list_trades.return_value = []
+    sync = PositionSync(mock_api)
+    observed = []
+    sync.set_order_callback(lambda state, data: observed.append((state, data)))
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+    api_callback(OrderState.StockDeal, create_stock_deal_event("missing-reports"))
+    update_event = create_stock_order_event("missing-reports")
+    update_event["operation"]["op_type"] = "Cancel"
+    api_callback(OrderState.StockOrder, update_event)
+
+    sync.sync_from_api()
+
+    assert sync.list_trades() == []
+    assert observed == [
+        (OrderState.StockDeal, create_stock_deal_event("missing-reports"))
+    ]
     sync.close()
 
 
@@ -452,6 +490,57 @@ def test_external_futures_order_and_deal_update_trade_and_position(mock_api):
 
     assert trades[0].status.status == Status.Filled
     assert sync.list_positions(account=mock_api.futopt_account)[0].code == "TXFH6"
+    sync.close()
+
+
+@pytest.mark.parametrize(
+    ("option_right", "native_right"),
+    [("OptionCall", "C"), ("OptionPut", "P")],
+)
+def test_external_option_order_normalizes_option_right(
+    mock_api, option_right, native_right
+):
+    from tests.conftest import create_mock_account
+
+    mock_api.futopt_account = create_mock_account("9100", "7654321", AccountType.Future)
+    mock_api.list_trades.return_value = []
+    sync = PositionSync(mock_api)
+    event = create_futures_order_event(f"option-{native_right}")
+    event["contract"].update(
+        {
+            "security_type": "OPT",
+            "code": "TXO",
+            "full_code": f"TXO20000{native_right}6",
+            "strike_price": 20000.0,
+            "option_right": option_right,
+        }
+    )
+
+    mock_api.set_order_callback.call_args.args[0](OrderState.FuturesOrder, event)
+
+    deadline = time.monotonic() + 2
+    trades = sync.list_trades()
+    while not trades and time.monotonic() < deadline:
+        time.sleep(0.02)
+        trades = sync.list_trades()
+
+    assert trades[0].contract.option_right.value == native_right
+    sync.close()
+
+
+def test_invalid_external_order_is_rejected_without_user_notification(mock_api):
+    mock_api.list_trades.return_value = []
+    sync = PositionSync(mock_api)
+    observed = []
+    sync.set_order_callback(lambda state, data: observed.append((state, data)))
+    event = create_stock_order_event("invalid-external")
+    event["order"]["action"] = "InvalidAction"
+
+    mock_api.set_order_callback.call_args.args[0](OrderState.StockOrder, event)
+    time.sleep(1.05)
+
+    assert sync.list_trades() == []
+    assert observed == []
     sync.close()
 
 
