@@ -81,10 +81,49 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  shioaji_compat:
+    name: Shioaji ${{ matrix.shioaji-version }} Compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shioaji-version: ['1.2.9', '1.3.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: |
+          uv sync --python 3.10
+          uv pip install --python .venv/bin/python "shioaji==${{ matrix.shioaji-version }}"
+
+      - name: Run compatibility tests with coverage
+        run: |
+          uv run --no-sync pytest --cov=sj_sync --cov-report=xml --cov-report=term-missing --verbose
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: shioaji-${{ matrix.shioaji-version }}
+          name: shioaji-${{ matrix.shioaji-version }}
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   build:
     name: Build Package
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, shioaji_compat]
     steps:
       - uses: actions/checkout@v4
 
@@ -111,13 +150,14 @@ jobs:
   all-checks-passed:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [lint, test, build]
+    needs: [lint, test, shioaji_compat, build]
     if: always()
     steps:
       - name: Check all jobs
         run: |
           if [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.shioaji_compat.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ]; then
             echo "One or more jobs failed"
             exit 1

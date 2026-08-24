@@ -29,6 +29,8 @@ def mock_api():
     api.set_order_callback = Mock()
     api.list_positions = Mock(return_value=[])
     api.list_accounts = Mock(return_value=[])
+    api.update_status = Mock()
+    api.list_trades = Mock(return_value=[])
 
     # Mock stock_account with broker_id and account_id
     api.stock_account = create_mock_account()

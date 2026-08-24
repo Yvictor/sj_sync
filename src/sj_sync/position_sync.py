@@ -13,17 +13,30 @@ from typing import (
     cast,
 )
 import datetime
+import re
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from .shioaji_compat import (
     sj,
     Account,
     AccountType,
     Action,
+    Deal,
+    Future,
+    FutureAccount,
+    FuturesOrder,
+    NativeOrderStatus as OrderStatus,
+    Option,
     OrderState,
     SjFuturePosition,
     SjStockPosition,
+    Stock,
+    StockAccount,
+    StockOrder,
     Status,
     StockOrderCond,
+    Trade,
     Unit,
 )
 from .models import StockPosition, FuturesPosition, AccountDict
@@ -80,7 +93,7 @@ class PositionSync:
         self.sync_threshold = sync_threshold
         self.timeout = timeout
         self._user_callback: Optional[OrderDealCallback] = None
-        self.api.set_order_callback(self._internal_callback)
+        self._live_trade_sync_enabled = self._supports_live_trade_sync()
 
         # Separate dicts for stock and futures positions
         # Stock: {account_key: {(code, cond): StockPosition}}
@@ -91,14 +104,460 @@ class PositionSync:
         ] = {}
         self._futures_positions: Dict[str, Dict[str, FuturesPosition]] = {}
 
+        # Native Trade references keyed by (account key, order id).
+        self._trades: Dict[Tuple[str, str], Trade] = {}
+        self._trade_lock = threading.RLock()
+        self._seen_deal_events: set[Tuple[str, str, str]] = set()
+        self._projected_deal_events: set[Tuple[str, str, str]] = set()
+        self._deferred_deals: Dict[
+            Tuple[str, str], Dict[Tuple[str, str, str], Dict]
+        ] = {}
+        self._pending_new_orders: set[Tuple[str, str]] = set()
+        self._discarded_order_keys: set[Tuple[str, str]] = set()
+        self._seen_order_events: set[Tuple[str, str, str, float]] = set()
+        self._last_order_event_ts: Dict[Tuple[str, str], float] = {}
+        self._pending_order_events: Dict[
+            Tuple[str, str],
+            Dict[Tuple[str, str, str, float], Tuple[OrderState, Dict]],
+        ] = {}
+        self._trade_sync_closed = threading.Event()
+        self._closed = False
+
         # Track last deal time for smart sync - one timestamp per account
         self._last_deal_time: Dict[str, datetime.datetime] = {}
 
         # Thread pool executor for background sync tasks
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sync")
+        self._trade_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="trade-sync"
+        )
 
-        # Auto-load positions on init
+        self.api.set_order_callback(self._internal_callback)
+
+        if self._live_trade_sync_enabled:
+            self._reconcile_trade_references()
+        else:
+            logger.warning(
+                "Live Trade synchronization is disabled for Shioaji "
+                f"{getattr(sj, '__version__', 'unknown')}; it is supported only "
+                "for Shioaji 1.2.x and 1.3.x."
+            )
+
+        # Auto-load positions on init.
         self._initialize_positions()
+
+    @staticmethod
+    def _supports_live_trade_sync() -> bool:
+        """Return whether the installed Shioaji exposes mutable Trade references."""
+        match = re.match(r"^(\d+)\.(\d+)", getattr(sj, "__version__", ""))
+        return bool(match and match.group(1) == "1" and match.group(2) in {"2", "3"})
+
+    def _trade_key(self, trade: Trade) -> Tuple[str, str]:
+        """Return the stable account/order identity for a Native Trade."""
+        order = getattr(trade, "order")
+        return self._get_account_key(order.account), str(order.id)
+
+    def _refresh_trade_references(self) -> None:
+        """Merge Native Trade references currently known by Shioaji."""
+        try:
+            trades = self.api.list_trades()
+            with self._trade_lock:
+                for trade in trades:
+                    self._trades[self._trade_key(trade)] = trade
+        except Exception as e:
+            logger.warning(f"Failed to load Trade references: {e}")
+
+    def _reconcile_trade_references(
+        self, account: Optional[Account] = None, clear_unresolved: bool = False
+    ) -> None:
+        """Refresh authoritative Trade state, then retain its Native references."""
+        try:
+            if account is None:
+                self.api.update_status(timeout=self.timeout)
+            else:
+                self.api.update_status(account, timeout=self.timeout)
+        except Exception as e:
+            logger.warning(f"Failed to reconcile Trade status: {e}")
+        self._refresh_trade_references()
+        with self._trade_lock:
+            trade_keys = list(self._trades)
+        for trade_key in trade_keys:
+            self._replay_pending_order_events(trade_key)
+            self._replay_deferred_deals(trade_key)
+        if clear_unresolved:
+            account_key = (
+                self._get_account_key(account) if account is not None else None
+            )
+
+            def in_scope(trade_key: Tuple[str, str]) -> bool:
+                return account_key is None or trade_key[0] == account_key
+
+            with self._trade_lock:
+                known_keys = set(self._trades)
+                unresolved = {
+                    key
+                    for key in self._pending_new_orders - known_keys
+                    if in_scope(key)
+                }
+                self._discarded_order_keys.update(unresolved)
+                self._pending_new_orders.difference_update(unresolved)
+                deferred_missing = {
+                    key
+                    for key in set(self._deferred_deals) - known_keys
+                    if in_scope(key)
+                }
+                for trade_key in deferred_missing:
+                    self._deferred_deals.pop(trade_key, None)
+                pending_missing = {
+                    key
+                    for key in set(self._pending_order_events) - known_keys
+                    if in_scope(key)
+                }
+                for trade_key in pending_missing:
+                    self._pending_order_events.pop(trade_key, None)
+            for _, order_id in unresolved | deferred_missing | pending_missing:
+                logger.warning(
+                    f"Discarded unresolved Trade reports for order {order_id} "
+                    "after reconciliation"
+                )
+
+    @staticmethod
+    def _enum_value(value: object) -> str:
+        """Normalize Shioaji enums and callback strings."""
+        return str(getattr(value, "value", value))
+
+    @staticmethod
+    def _is_combo_event(state: OrderState, data: Dict) -> bool:
+        """Return whether a futures report belongs to an unsupported combo order."""
+        if state == OrderState.FuturesOrder:
+            value = data.get("order", {}).get("combo", False)
+        elif state == OrderState.FuturesDeal:
+            value = data.get("combo", False)
+        else:
+            return False
+        return value is True or str(value).lower() == "true"
+
+    def _project_order_event(self, data: Dict) -> bool:
+        """Project an order report into an existing Native Trade reference."""
+        if not self._live_trade_sync_enabled:
+            return False
+
+        order_data = data["order"]
+        account_key = self._get_account_key(order_data["account"])
+        key = (account_key, str(order_data["id"]))
+        operation = data["operation"]
+        op_type = self._enum_value(operation["op_type"])
+        op_code = str(operation["op_code"])
+        status_data = data.get("status", {})
+        exchange_ts = float(status_data.get("exchange_ts", 0))
+        event_key = (key[0], key[1], op_type, exchange_ts)
+
+        with self._trade_lock:
+            trade = self._trades.get(key)
+            if trade is None:
+                return False
+            if event_key in self._seen_order_events:
+                return True
+            self._seen_order_events.add(event_key)
+
+            last_ts = self._last_order_event_ts.get(key, float("-inf"))
+            if exchange_ts < last_ts:
+                return True
+            self._last_order_event_ts[key] = exchange_ts
+
+            terminal = {Status.Filled, Status.Cancelled, Status.Failed}
+            current_status = trade.status.status
+            if op_type == "New" and current_status not in terminal:
+                trade.status.status = (
+                    Status.Submitted if op_code == "00" else Status.Failed
+                )
+            elif (
+                op_type == "Cancel"
+                and op_code == "00"
+                and current_status not in terminal
+            ):
+                trade.status.status = Status.Cancelled
+
+            if op_type == "UpdatePrice" and op_code == "00":
+                trade.order.price = (
+                    status_data.get("modified_price") or order_data["price"]
+                )
+            for field in ("id", "seqno", "ordno", "custom_field"):
+                if field in order_data:
+                    setattr(trade.order, field, order_data[field])
+
+            trade.status.status_code = op_code
+            trade.status.msg = str(operation.get("op_msg", ""))
+            if "id" in status_data:
+                trade.status.id = status_data["id"]
+            if exchange_ts:
+                event_time = datetime.datetime.fromtimestamp(
+                    exchange_ts,
+                    tz=datetime.timezone(datetime.timedelta(hours=8)),
+                )
+                if op_type == "New" and trade.status.order_datetime is None:
+                    trade.status.order_datetime = event_time
+                trade.status.modified_time = event_time
+            for field in (
+                "modified_price",
+                "cancel_quantity",
+                "order_quantity",
+                "web_id",
+            ):
+                if field in status_data:
+                    setattr(trade.status, field, status_data[field])
+        return True
+
+    def _order_trade_key(self, data: Dict) -> Tuple[str, str]:
+        """Return the account/order identity from an order report."""
+        order_data = data["order"]
+        return self._get_account_key(order_data["account"]), str(order_data["id"])
+
+    def _order_event_key(self, data: Dict) -> Tuple[str, str, str, float]:
+        """Return the deduplication identity of an order report."""
+        trade_key = self._order_trade_key(data)
+        op_type = self._enum_value(data["operation"]["op_type"])
+        exchange_ts = float(data.get("status", {}).get("exchange_ts", 0))
+        return trade_key[0], trade_key[1], op_type, exchange_ts
+
+    def _defer_order_event(self, state: OrderState, data: Dict) -> None:
+        """Retain an Update/Cancel report until its Local Trade appears."""
+        trade_key = self._order_trade_key(data)
+        event_key = self._order_event_key(data)
+        with self._trade_lock:
+            self._pending_order_events.setdefault(trade_key, {})[event_key] = (
+                state,
+                data,
+            )
+        logger.warning(
+            f"Deferred {self._enum_value(data['operation']['op_type'])} report "
+            f"for unresolved order {trade_key[1]}"
+        )
+
+    def _replay_pending_order_events(self, trade_key: Tuple[str, str]) -> None:
+        """Project retained Update/Cancel reports after a Local Trade appears."""
+        with self._trade_lock:
+            pending = list(self._pending_order_events.get(trade_key, {}).items())
+        for event_key, (state, data) in pending:
+            if self._project_order_event(data):
+                with self._trade_lock:
+                    events = self._pending_order_events.get(trade_key)
+                    if events is not None:
+                        events.pop(event_key, None)
+                        if not events:
+                            self._pending_order_events.pop(trade_key, None)
+                self._replay_deferred_deals(trade_key)
+                self._notify_user_callback(state, data)
+
+    def _build_external_trade(self, state: OrderState, data: Dict) -> Trade:
+        """Build a Native Trade for an order submitted by another client."""
+        order_data = dict(data["order"])
+        account_data = order_data.pop("account")
+        common_account = {
+            "person_id": account_data.get("person_id", ""),
+            "broker_id": account_data["broker_id"],
+            "account_id": account_data["account_id"],
+            "signed": account_data.get("signed", False),
+            "username": account_data.get("username", ""),
+        }
+        contract_data = dict(data["contract"])
+
+        if state == OrderState.StockOrder:
+            account = StockAccount(**common_account)
+            order_data["account"] = account
+            order = StockOrder(**order_data)
+            contract = Stock(**contract_data)
+        else:
+            account = FutureAccount(**common_account)
+            if "oc_type" in order_data and "octype" not in order_data:
+                order_data["octype"] = order_data.pop("oc_type")
+            for extra_field in ("market_type", "subaccount", "combo"):
+                order_data.pop(extra_field, None)
+            order_data["account"] = account
+            order = FuturesOrder(**order_data)
+            security_type = self._enum_value(contract_data.get("security_type", "FUT"))
+            full_code = contract_data.pop("full_code", None)
+            if full_code:
+                contract_data["code"] = full_code
+            contract_cls = Option if security_type == "OPT" else Future
+            option_right = contract_data.get("option_right")
+            if contract_cls is Future:
+                contract_data.pop("option_right", None)
+            elif option_right == "OptionCall":
+                contract_data["option_right"] = "C"
+            elif option_right == "OptionPut":
+                contract_data["option_right"] = "P"
+            contract = contract_cls(**contract_data)
+
+        status_data = data.get("status", {})
+        status = OrderStatus(
+            id=status_data.get("id", order.id),
+            status=Status.PendingSubmit,
+            status_code="",
+            web_id=status_data.get("web_id", ""),
+            modified_price=status_data.get("modified_price", 0),
+            order_quantity=status_data.get("order_quantity", order.quantity),
+            deal_quantity=0,
+            cancel_quantity=status_data.get("cancel_quantity", 0),
+            deals=[],
+        )
+        return Trade(contract=contract, order=order, status=status)
+
+    def _resolve_new_order(self, state: OrderState, data: Dict) -> None:
+        """Resolve a callback-before-return race, then classify an External Order."""
+        key = self._order_trade_key(data)
+        deadline = time.monotonic() + 1.0
+        try:
+            while not self._trade_sync_closed.is_set() and time.monotonic() < deadline:
+                self._refresh_trade_references()
+                with self._trade_lock:
+                    if key in self._discarded_order_keys:
+                        return
+                    if key in self._trades:
+                        break
+                self._trade_sync_closed.wait(0.02)
+
+            with self._trade_lock:
+                if key in self._discarded_order_keys:
+                    return
+                if key not in self._trades and not self._trade_sync_closed.is_set():
+                    self._trades[key] = self._build_external_trade(state, data)
+
+            if not self._trade_sync_closed.is_set():
+                self._project_order_event(data)
+                self._replay_deferred_deals(key)
+                self._notify_user_callback(state, data)
+        except Exception as e:
+            logger.error(f"Failed to resolve order report {key[1]}: {e}")
+        finally:
+            with self._trade_lock:
+                self._pending_new_orders.discard(key)
+
+    def _schedule_new_order_resolution(self, state: OrderState, data: Dict) -> bool:
+        """Schedule unresolved New report classification once."""
+        if self._enum_value(data["operation"]["op_type"]) != "New":
+            return False
+        key = self._order_trade_key(data)
+        with self._trade_lock:
+            if self._closed or self._trade_sync_closed.is_set():
+                return True
+            if key in self._pending_new_orders:
+                return True
+            self._pending_new_orders.add(key)
+            try:
+                self._trade_executor.submit(self._resolve_new_order, state, data)
+            except RuntimeError:
+                self._pending_new_orders.discard(key)
+        return True
+
+    def _notify_user_callback(
+        self, state: OrderState, data: Union[StockDeal, FuturesDeal, Dict]
+    ) -> None:
+        """Notify the user after internal projections have run."""
+        if self._user_callback is not None:
+            try:
+                self._user_callback(state, data)
+            except Exception as e:
+                logger.error(f"Error in user callback: {e}")
+
+    def _deal_event_key(self, data: Dict) -> Tuple[str, str, str]:
+        """Return the account, Trade, and exchange identity of a deal report."""
+        account: AccountDict = {
+            "broker_id": str(data["broker_id"]),
+            "account_id": str(data["account_id"]),
+        }
+        account_key = self._get_account_key(account)
+        return account_key, str(data["trade_id"]), str(data["exchange_seq"])
+
+    def _project_deal_event(self, data: Dict) -> bool:
+        """Project a deal report into its Native Trade once."""
+        if not self._live_trade_sync_enabled:
+            return False
+
+        event_key = self._deal_event_key(data)
+        with self._trade_lock:
+            if event_key in self._projected_deal_events:
+                return True
+
+        trade_key = (event_key[0], event_key[1])
+        with self._trade_lock:
+            trade = self._trades.get(trade_key)
+            if trade is None:
+                self._deferred_deals.setdefault(trade_key, {})[event_key] = data
+                return False
+
+            deals: List[Deal] = trade.status.deals or []
+            trade.status.deals = deals
+            deals.append(
+                Deal(
+                    seq=str(data["exchange_seq"]),
+                    price=data["price"],
+                    quantity=data["quantity"],
+                    ts=data["ts"],
+                )
+            )
+            trade.status.deal_quantity += data["quantity"]
+            order_quantity = trade.status.order_quantity or trade.order.quantity
+            if trade.status.status not in {
+                Status.Filled,
+                Status.Cancelled,
+                Status.Failed,
+            }:
+                trade.status.status = (
+                    Status.Filled
+                    if trade.status.deal_quantity >= order_quantity
+                    else Status.PartFilled
+                )
+            self._projected_deal_events.add(event_key)
+            pending = self._deferred_deals.get(trade_key)
+            if pending is not None:
+                pending.pop(event_key, None)
+                if not pending:
+                    self._deferred_deals.pop(trade_key, None)
+        return True
+
+    def _replay_deferred_deals(self, trade_key: Tuple[str, str]) -> None:
+        """Apply retained Deal-before-Order reports without touching positions again."""
+        with self._trade_lock:
+            deferred = list(self._deferred_deals.get(trade_key, {}).values())
+        for deal in deferred:
+            self._project_deal_event(deal)
+
+    def list_trades(self) -> List[Trade]:
+        """Return a new list containing the currently tracked Native Trades."""
+        if not self._live_trade_sync_enabled:
+            return list(self.api.list_trades())
+        self._refresh_trade_references()
+        with self._trade_lock:
+            trade_keys = list(self._trades)
+        for trade_key in trade_keys:
+            self._replay_pending_order_events(trade_key)
+            self._replay_deferred_deals(trade_key)
+        with self._trade_lock:
+            return list(self._trades.values())
+
+    def close(self) -> None:
+        """Stop background classification and synchronization work."""
+        with self._trade_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._trade_sync_closed.set()
+        thread_name = threading.current_thread().name
+        self._trade_executor.shutdown(
+            wait=not thread_name.startswith("trade-sync"), cancel_futures=True
+        )
+        self._executor.shutdown(
+            wait=not thread_name.startswith("sync"), cancel_futures=True
+        )
+
+    def __enter__(self) -> "PositionSync":
+        """Return this sync for use as a context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """Close background workers when leaving a context."""
+        self.close()
 
     def _get_account_key(self, account: Union[Account, AccountDict]) -> str:
         """Generate account key from Account object or dict.
@@ -133,9 +592,13 @@ class PositionSync:
         accounts = self.api.list_accounts()
 
         for account in accounts:
-            self._sync_account_positions(account)
+            self._sync_account_positions(
+                account, refresh_trades=not self._live_trade_sync_enabled
+            )
 
-    def _sync_account_positions(self, account: Account) -> None:
+    def _sync_account_positions(
+        self, account: Account, refresh_trades: bool = True
+    ) -> None:
         """Sync positions from API for a specific account.
 
         Args:
@@ -156,7 +619,9 @@ class PositionSync:
         account_type = account.account_type
         if account_type == AccountType.Stock:
             # Load and sum today's trades for this stock account
-            trades_sum = self._load_and_sum_today_trades(account)
+            trades_sum = self._load_and_sum_today_trades(
+                account, refresh_status=refresh_trades
+            )
 
             # Clear existing positions for this account
             self._stock_positions[account_key] = {}
@@ -199,7 +664,7 @@ class PositionSync:
         logger.info(f"Synced positions from API for account {account_key}")
 
     def _load_and_sum_today_trades(
-        self, account: Account
+        self, account: Account, refresh_status: bool = True
     ) -> Dict[Tuple[str, StockOrderCond, Action], int]:
         """Load and sum today's trades by (code, cond, action).
 
@@ -210,8 +675,8 @@ class PositionSync:
             Dict mapping (code, cond, action) -> total quantity
         """
         try:
-            # Update status for this specific account
-            self.api.update_status(account)
+            if refresh_status:
+                self.api.update_status(account)
             all_trades = self.api.list_trades()
 
             # Sum quantities by (code, cond, action)
@@ -400,14 +865,21 @@ class PositionSync:
             >>> # Sync only stock account
             >>> sync.sync_from_api(account=api.stock_account)
         """
+        if self._live_trade_sync_enabled:
+            self._reconcile_trade_references(account, clear_unresolved=True)
+
         if account is None:
             # Sync all accounts
             accounts = self.api.list_accounts()
             for acc in accounts:
-                self._sync_account_positions(acc)
+                self._sync_account_positions(
+                    acc, refresh_trades=not self._live_trade_sync_enabled
+                )
         else:
             # Sync specific account
-            self._sync_account_positions(account)
+            self._sync_account_positions(
+                account, refresh_trades=not self._live_trade_sync_enabled
+            )
 
     def list_positions(
         self,
@@ -792,15 +1264,47 @@ class PositionSync:
             state: OrderState enum value
             data: Order/deal data dictionary
         """
-        # Process position update first
-        self.on_order_deal_event(state, data)
+        if self._closed:
+            return
 
-        # Then call user callback if registered
-        if self._user_callback is not None:
-            try:
-                self._user_callback(state, data)
-            except Exception as e:
-                logger.error(f"Error in user callback: {e}")
+        apply_position = True
+        event_data = cast(Dict, data)
+        is_combo = self._is_combo_event(state, event_data)
+
+        # Project Trade state before positions and the user callback.
+        if (
+            self._live_trade_sync_enabled
+            and not is_combo
+            and state
+            in (
+                OrderState.StockOrder,
+                OrderState.FuturesOrder,
+            )
+        ):
+            order_data = event_data
+            resolved = self._project_order_event(order_data)
+            if resolved:
+                self._replay_deferred_deals(self._order_trade_key(order_data))
+            if not resolved and self._schedule_new_order_resolution(state, order_data):
+                return
+            if not resolved:
+                self._defer_order_event(state, order_data)
+                return
+        elif not is_combo and state in (OrderState.StockDeal, OrderState.FuturesDeal):
+            deal_data = event_data
+            if "trade_id" in deal_data and "exchange_seq" in deal_data:
+                event_key = self._deal_event_key(deal_data)
+                with self._trade_lock:
+                    apply_position = event_key not in self._seen_deal_events
+                    self._seen_deal_events.add(event_key)
+                self._project_deal_event(deal_data)
+
+        # Process position update next.
+        if apply_position:
+            self.on_order_deal_event(state, data)
+
+        # Then call user callback if registered.
+        self._notify_user_callback(state, data)
 
     def set_order_callback(self, callback: OrderDealCallback) -> None:
         """Set user callback for order deal events.

@@ -21,6 +21,7 @@ Shioaji 的即時部位同步工具。
 ## 功能特色
 
 - ✅ **即時更新**：透過 `OrderState.StockDeal` 和 `OrderState.FuturesDeal` 回報
+- ✅ **Native Trade 主動更新**：Shioaji 1.2.x 與 1.3.x 可由委託／成交回報即時更新
 - ✅ **自訂回報支援**：註冊自己的回報處理函式，同時保持自動同步
 - ✅ **智能同步模式**：智慧切換本地計算與 API 查詢
 - ✅ **手動同步 API**：強制與 API 伺服器同步以進行對帳
@@ -134,6 +135,36 @@ sync.set_order_callback(my_callback)
 # 3. 隨時可查詢更新後的部位
 positions = sync.list_positions()
 ```
+
+### Trade 主動同步
+
+在 Shioaji 1.2.x 與 1.3.x，`PositionSync` 會保留原始 `sj.Shioaji`
+實例暴露的可變 Native Trade reference。委託與成交回報會先更新這些物件，
+再呼叫使用者 callback：
+
+```python
+trade = api.place_order(contract, order)
+
+# PositionSync 回傳同一個 Native Trade reference。
+assert sync.list_trades()[0] is trade
+
+# StockOrder/FuturesOrder 與 StockDeal/FuturesDeal 回報會更新 trade.status。
+```
+
+`sync.list_trades()` 會建立新的 list，但其中仍是被追蹤的 Native Trade
+references。結果同時包含本 client 下單的 Local Trades，以及由其他 client
+下單、根據主動回報建立的 Trades。若 Deal 早於 Order 抵達，會先暫存並在
+Trade 可解析後套用一次。
+
+sj_sync 不會把組合單（combo）的委託／成交回報投影到 Trade；既有的部位處理
+與使用者 callback 流程維持不變。
+
+減量後，Native Trade 的 `trade.order.quantity` 仍代表原始委託量；已減少或
+取消的數量會反映在 `trade.status.cancel_quantity`。
+
+Shioaji 1.4 以上版本會明確停用 Trade 主動同步。Shioaji 1.5+ 回傳沒有穩定
+object identity 的唯讀 Trade snapshots，因此需由 Shioaji Rust core 實作此能力。
+部位同步與 `sync.list_trades()` 仍可使用，初始化時會記錄功能停用 warning。
 
 **回報鏈：**
 - `PositionSync` 先處理成交事件（更新部位）
@@ -311,6 +342,12 @@ sync.set_order_callback(my_callback)
 
 **注意：** 您的回報處理函式會在 `PositionSync` 處理事件後被呼叫。使用者回報函式的例外會被捕捉並記錄。
 
+#### `list_trades() -> List[Trade]`
+
+回傳一個新的 list，其中包含被追蹤的 Native Trade references。Shioaji 1.2.x
+與 1.3.x 會由主動回報更新這些 references；較新版本則直接委派給 Native API，
+不嘗試修改唯讀 Trade。
+
 #### `sync_from_api(account: Optional[Account] = None) -> None`
 手動從 API 伺服器同步部位。
 
@@ -336,6 +373,15 @@ sync.sync_from_api(account=api.futopt_account)
 - 不受 `sync_threshold` 設定影響的強制刷新
 
 **注意：** 此方法會清除要同步帳戶的現有部位，並從 API 伺服器重新載入。
+
+#### `close() -> None`
+
+停止背景對帳與 unresolved order 分類工作。`PositionSync` 也支援 context manager：
+
+```python
+with PositionSync(api) as sync:
+    trades = sync.list_trades()
+```
 
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 訂單成交事件回報。初始化時自動註冊。
@@ -372,12 +418,16 @@ sync.sync_from_api(account=api.futopt_account)
 ## 運作原理
 
 ### 1. 初始化
+- Shioaji 1.2.x/1.3.x 會呼叫一次 `api.update_status()` 並保留 Native Trade references
 - 呼叫 `api.list_accounts()` 取得所有帳戶
 - 透過 `api.list_positions(account)` 載入各帳戶部位
 - 從 `api.list_trades()` 計算 `yd_offset_quantity`（盤中重啟用）
 - 註冊 `on_order_deal_event` 回報
 
 ### 2. 即時更新
+- 先把委託回報投影到 Trade 狀態，再更新部位並呼叫使用者 callback
+- 以帳戶、Trade ID 與 exchange sequence 去除重複成交
+- 區分本 client 的 Local Orders 與其他 client 的主動回報
 - 當訂單成交時，Shioaji 觸發回報
 - 回報更新內部部位字典
 - 買進成交增加數量（或建立新部位）
