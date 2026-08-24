@@ -20,7 +20,17 @@ def test_exports_expected_symbols():
         "Unit",
         "Account",
         "AccountType",
+        "StockAccount",
+        "FutureAccount",
         "Contract",
+        "Stock",
+        "Future",
+        "Option",
+        "Deal",
+        "FuturesOrder",
+        "NativeOrderStatus",
+        "StockOrder",
+        "Trade",
         "SjStockPosition",
         "SjFuturePosition",
         "Snapshot",
@@ -41,7 +51,17 @@ def test_shioaji_1_5_imports_use_top_level_symbols():
     assert compat.Unit is compat.sj.Unit
     assert compat.Account is compat.sj.Account
     assert compat.AccountType is compat.sj.AccountType
+    assert compat.StockAccount is compat.sj.Account
+    assert compat.FutureAccount is compat.sj.Account
     assert compat.Contract is compat.sj.Contract
+    assert compat.Stock is compat.sj.Stock
+    assert compat.Future is compat.sj.Future
+    assert compat.Option is compat.sj.Option
+    assert compat.Deal is compat.sj.Deal
+    assert compat.FuturesOrder is compat.sj.FuturesOrder
+    assert compat.NativeOrderStatus is compat.sj.OrderStatus
+    assert compat.StockOrder is compat.sj.StockOrder
+    assert compat.Trade is compat.sj.Trade
     assert compat.SjStockPosition is compat.sj.StockPosition
     assert compat.SjFuturePosition is compat.sj.FuturePosition
     assert compat.Snapshot is compat.sj.Snapshot

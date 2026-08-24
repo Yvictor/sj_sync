@@ -21,6 +21,7 @@ English | [繁體中文](README.zh-TW.md)
 ## Features
 
 - ✅ **Real-time updates** via `OrderState.StockDeal` and `OrderState.FuturesDeal` callbacks
+- ✅ **Live Native Trade updates** from order/deal callbacks on Shioaji 1.2.x and 1.3.x
 - ✅ **Custom callback support**: Register your own callback while maintaining auto-sync
 - ✅ **Smart sync mode**: Intelligently switches between local calculations and API queries
 - ✅ **Manual sync API**: Force sync with API server for reconciliation
@@ -134,6 +135,39 @@ sync.set_order_callback(my_callback)
 # 3. You can query updated positions anytime
 positions = sync.list_positions()
 ```
+
+### Live Trade Synchronization
+
+On Shioaji 1.2.x and 1.3.x, `PositionSync` retains the mutable Native Trade
+references exposed by the original `sj.Shioaji` instance. Order and deal reports
+update those objects before the user callback runs:
+
+```python
+trade = api.place_order(contract, order)
+
+# The same Native Trade reference is returned by PositionSync.
+assert sync.list_trades()[0] is trade
+
+# StockOrder/FuturesOrder and StockDeal/FuturesDeal reports update trade.status.
+```
+
+`sync.list_trades()` returns a new list containing the tracked Native Trade
+references. It contains both Local Trades and Trades built from reports for
+orders submitted by another client. A deal received before its order report is
+retained and applied once the Trade can be resolved.
+
+Combo order/deal reports are not projected into Trades by sj_sync. Their
+existing position and user-callback flow is left unchanged.
+
+For quantity reductions, Native Trade keeps `trade.order.quantity` as the
+original submitted quantity. The reduced/cancelled amount is reflected by
+`trade.status.cancel_quantity`.
+
+Live Trade synchronization is intentionally disabled on Shioaji 1.4 and later.
+Shioaji 1.5+ returns immutable Trade snapshots without stable object identity;
+that behavior must be implemented by Shioaji's Rust core. Position syncing and
+`sync.list_trades()` remain available, and initialization logs a warning about
+the disabled feature.
 
 **Callback Chain:**
 - `PositionSync` processes deal events first (updates positions)
@@ -313,6 +347,12 @@ sync.set_order_callback(my_callback)
 
 **Note:** Your callback is invoked after `PositionSync` processes the event. Exceptions in user callback are caught and logged.
 
+#### `list_trades() -> List[Trade]`
+
+Return a new list containing tracked Native Trade references. On Shioaji 1.2.x
+and 1.3.x, reports actively update these references. On later versions this
+delegates to the Native API without attempting mutation.
+
 #### `sync_from_api(account: Optional[Account] = None) -> None`
 Manually sync positions from API server.
 
@@ -338,6 +378,16 @@ sync.sync_from_api(account=api.futopt_account)
 - Force refresh regardless of `sync_threshold` setting
 
 **Note:** This method clears existing positions for the account(s) being synced and reloads from API server.
+
+#### `close() -> None`
+
+Stop background reconciliation and unresolved-order classification. `PositionSync`
+also supports the context-manager protocol:
+
+```python
+with PositionSync(api) as sync:
+    trades = sync.list_trades()
+```
 
 #### `on_order_deal_event(state: OrderState, data: Dict)`
 Callback for order deal events. Automatically registered on init.
@@ -374,12 +424,16 @@ Register user callback for bid/ask events (called after internal update).
 ## How It Works
 
 ### 1. Initialization
+- On Shioaji 1.2.x/1.3.x, calls `api.update_status()` once and retains Native Trade references
 - Calls `api.list_accounts()` to get all accounts
 - Loads positions for each account via `api.list_positions(account)`
 - Calculates `yd_offset_quantity` from `api.list_trades()` (for midday restart)
 - Registers `on_order_deal_event` callback
 
 ### 2. Real-time Updates
+- Projects order reports into Trade status before updating positions and invoking the user callback
+- Deduplicates deals by account, Trade ID, and exchange sequence
+- Distinguishes Local Orders from reports produced by another client
 - When orders are filled, Shioaji triggers the callback
 - Callback updates internal position dictionaries
 - Buy deals increase quantity (or create new position)
