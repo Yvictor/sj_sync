@@ -160,7 +160,11 @@ sj_sync 不會把組合單（combo）的委託／成交回報投影到 Trade；�
 與使用者 callback 流程維持不變。
 
 減量後，Native Trade 的 `trade.order.quantity` 仍代表原始委託量；已減少或
-取消的數量會反映在 `trade.status.cancel_quantity`。
+取消的數量會累加在 `trade.status.cancel_quantity`，重複回報不會重複計入。
+
+改價後，`trade.order.price` 同樣保留原始委託價，最後一次成功的改後價存放在
+`trade.status.modified_price`。後續刪單、減量或失敗操作都不會清除這個值，
+行為與 `api.update_status()` 回傳的 Trade 一致。
 
 Shioaji 1.4 以上版本會明確停用 Trade 主動同步。Shioaji 1.5+ 回傳沒有穩定
 object identity 的唯讀 Trade snapshots，因此需由 Shioaji Rust core 實作此能力。

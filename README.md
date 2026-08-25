@@ -161,7 +161,14 @@ existing position and user-callback flow is left unchanged.
 
 For quantity reductions, Native Trade keeps `trade.order.quantity` as the
 original submitted quantity. The reduced/cancelled amount is reflected by
-`trade.status.cancel_quantity`.
+`trade.status.cancel_quantity` and accumulates across successful quantity
+reductions and cancellation. Duplicate reports do not add the quantity twice.
+
+For price updates, `trade.order.price` also remains the original submitted
+price. The latest successful modified price is stored in
+`trade.status.modified_price`. Later cancellation, quantity updates, or failed
+operations preserve that value, matching the Trade returned by
+`api.update_status()`.
 
 Live Trade synchronization is intentionally disabled on Shioaji 1.4 and later.
 Shioaji 1.5+ returns immutable Trade snapshots without stable object identity;

@@ -24,11 +24,12 @@ pytestmark = pytest.mark.skipif(
 
 
 def trade_fields(trade):
-    """Return the six public fields specified by the feature."""
+    """Return the seven public fields specified by the feature."""
     return {
         "status": str(getattr(trade.status.status, "value", trade.status.status)),
         "price": float(trade.order.price),
         "quantity": int(trade.order.quantity),
+        "modified_price": float(trade.status.modified_price),
         "cancel_quantity": int(trade.status.cancel_quantity),
         "deal_quantity": int(trade.status.deal_quantity),
         "deals": len(trade.status.deals or []),
@@ -47,6 +48,7 @@ def create_native_trade():
     trade.status.status_code = ""
     trade.status.msg = ""
     trade.status.order_quantity = 2
+    trade.status.modified_price = 0.0
     trade.status.deal_quantity = 0
     trade.status.cancel_quantity = 0
     trade.status.deals = []
@@ -153,6 +155,7 @@ def initial_local_native_trade(context):
         "status": "PendingSubmit",
         "price": 100.0,
         "quantity": 2,
+        "modified_price": 0.0,
         "cancel_quantity": 0,
         "deal_quantity": 0,
         "deals": 0,
@@ -214,11 +217,20 @@ def receive_duplicate_deal_report(context, exchange_seq, price, quantity):
     receive_deal_report(context, exchange_seq, price, quantity)
 
 
-def expected_fields(status, price, quantity, cancel_quantity, deal_quantity, deals):
+def expected_fields(
+    status,
+    price,
+    quantity,
+    modified_price,
+    cancel_quantity,
+    deal_quantity,
+    deals,
+):
     return {
         "status": status,
         "price": price,
         "quantity": quantity,
+        "modified_price": modified_price,
         "cancel_quantity": cancel_quantity,
         "deal_quantity": deal_quantity,
         "deals": deals,
@@ -227,29 +239,55 @@ def expected_fields(status, price, quantity, cancel_quantity, deal_quantity, dea
 
 @then(
     parsers.parse(
-        "Trade 六個欄位應為 status {status}、order.price {price:f}、order.quantity {quantity:d}、cancel_quantity {cancel_quantity:d}、deal_quantity {deal_quantity:d}、deals {deals:d} 筆"
+        "Trade 七個欄位應為 status {status}、order.price {price:f}、order.quantity {quantity:d}、modified_price {modified_price:f}、cancel_quantity {cancel_quantity:d}、deal_quantity {deal_quantity:d}、deals {deals:d} 筆"
     )
 )
 def assert_trade_fields(
-    context, status, price, quantity, cancel_quantity, deal_quantity, deals
+    context,
+    status,
+    price,
+    quantity,
+    modified_price,
+    cancel_quantity,
+    deal_quantity,
+    deals,
 ):
     """Assert every required Trade field as one coherent public state."""
     assert trade_fields(context["trade"]) == expected_fields(
-        status, price, quantity, cancel_quantity, deal_quantity, deals
+        status,
+        price,
+        quantity,
+        modified_price,
+        cancel_quantity,
+        deal_quantity,
+        deals,
     )
 
 
 @then(
     parsers.parse(
-        "使用者 callback 觀察到 status {status}、order.price {price:f}、order.quantity {quantity:d}、cancel_quantity {cancel_quantity:d}、deal_quantity {deal_quantity:d}、deals {deals:d} 筆"
+        "使用者 callback 觀察到 status {status}、order.price {price:f}、order.quantity {quantity:d}、modified_price {modified_price:f}、cancel_quantity {cancel_quantity:d}、deal_quantity {deal_quantity:d}、deals {deals:d} 筆"
     )
 )
 def assert_user_callback_fields(
-    context, status, price, quantity, cancel_quantity, deal_quantity, deals
+    context,
+    status,
+    price,
+    quantity,
+    modified_price,
+    cancel_quantity,
+    deal_quantity,
+    deals,
 ):
     """Assert Trade projection completed before the user callback."""
     assert context["observed"][-1] == expected_fields(
-        status, price, quantity, cancel_quantity, deal_quantity, deals
+        status,
+        price,
+        quantity,
+        modified_price,
+        cancel_quantity,
+        deal_quantity,
+        deals,
     )
 
 

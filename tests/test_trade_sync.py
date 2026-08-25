@@ -2,6 +2,7 @@
 
 from unittest.mock import Mock
 from copy import deepcopy
+import datetime
 import threading
 import time
 
@@ -544,7 +545,7 @@ def test_invalid_external_order_is_rejected_without_user_notification(mock_api):
     sync.close()
 
 
-def test_update_price_report_changes_price_without_regressing_status(mock_api):
+def test_update_price_preserves_original_price_and_records_modified_price(mock_api):
     native_trade = create_native_trade()
     native_trade.status.status = Status.Submitted
     mock_api.list_trades.return_value = [native_trade]
@@ -557,7 +558,8 @@ def test_update_price_report_changes_price_without_regressing_status(mock_api):
 
     api_callback(OrderState.StockOrder, event)
 
-    assert native_trade.order.price == 101.0
+    assert native_trade.order.price == 100.0
+    assert native_trade.status.modified_price == 101.0
     assert native_trade.status.status == Status.Submitted
 
 
@@ -579,6 +581,220 @@ def test_update_quantity_keeps_original_quantity_and_tracks_cancelled_quantity(
     assert native_trade.order.quantity == 2
     assert native_trade.status.cancel_quantity == 1
     assert native_trade.status.status == Status.PartFilled
+
+
+def test_external_order_reduction_then_cancel_accumulates_cancel_quantity(mock_api):
+    mock_api.list_trades.return_value = []
+    sync = PositionSync(mock_api)
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+    new_event = create_stock_order_event("external-reduce-cancel")
+    api_callback(OrderState.StockOrder, new_event)
+
+    deadline = time.monotonic() + 2
+    trades = sync.list_trades()
+    while not trades and time.monotonic() < deadline:
+        time.sleep(0.02)
+        trades = sync.list_trades()
+
+    update_event = deepcopy(new_event)
+    update_event["operation"]["op_type"] = "UpdateQty"
+    update_event["status"]["exchange_ts"] += 1
+    update_event["status"]["order_quantity"] = 1
+    update_event["status"]["cancel_quantity"] = 1
+    api_callback(OrderState.StockOrder, update_event)
+
+    cancel_event = deepcopy(new_event)
+    cancel_event["operation"]["op_type"] = "Cancel"
+    cancel_event["status"]["exchange_ts"] += 2
+    cancel_event["status"]["order_quantity"] = 0
+    cancel_event["status"]["cancel_quantity"] = 1
+    api_callback(OrderState.StockOrder, cancel_event)
+
+    assert trades[0].status.status == Status.Cancelled
+    assert trades[0].status.cancel_quantity == 2
+    sync.close()
+
+
+def test_external_order_cancel_preserves_previous_modified_price(mock_api):
+    mock_api.list_trades.return_value = []
+    sync = PositionSync(mock_api)
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+    new_event = create_stock_order_event("external-price-cancel")
+    api_callback(OrderState.StockOrder, new_event)
+
+    deadline = time.monotonic() + 2
+    trades = sync.list_trades()
+    while not trades and time.monotonic() < deadline:
+        time.sleep(0.02)
+        trades = sync.list_trades()
+
+    update_event = deepcopy(new_event)
+    update_event["operation"]["op_type"] = "UpdatePrice"
+    update_event["status"]["exchange_ts"] += 1
+    update_event["status"]["modified_price"] = 101.0
+    api_callback(OrderState.StockOrder, update_event)
+
+    cancel_event = deepcopy(new_event)
+    cancel_event["operation"]["op_type"] = "Cancel"
+    cancel_event["status"]["exchange_ts"] += 2
+    cancel_event["status"]["cancel_quantity"] = 2
+    api_callback(OrderState.StockOrder, cancel_event)
+
+    assert trades[0].status.status == Status.Cancelled
+    assert trades[0].order.price == 100.0
+    assert trades[0].status.modified_price == 101.0
+    sync.close()
+
+
+@pytest.mark.parametrize("op_type", ["UpdatePrice", "UpdateQty", "Cancel"])
+def test_failed_order_operation_preserves_existing_trade_state(mock_api, op_type):
+    native_trade = create_native_trade()
+    native_trade.status.status = Status.Submitted
+    native_trade.status.modified_price = 101.0
+    original_modified_time = datetime.datetime(
+        2026, 8, 25, 9, 30, tzinfo=datetime.timezone(datetime.timedelta(hours=8))
+    )
+    native_trade.status.modified_time = original_modified_time
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    event = create_stock_order_event()
+    event["operation"].update(
+        {"op_type": op_type, "op_code": "E003", "op_msg": "rejected"}
+    )
+    event["status"]["order_quantity"] = 1
+    event["status"]["cancel_quantity"] = 1
+    event["status"]["modified_price"] = 0.0
+
+    mock_api.set_order_callback.call_args.args[0](OrderState.StockOrder, event)
+
+    assert native_trade.status.status == Status.Submitted
+    assert native_trade.status.order_quantity == 2
+    assert native_trade.status.cancel_quantity == 0
+    assert native_trade.status.modified_price == 101.0
+    assert native_trade.status.modified_time == original_modified_time
+    assert native_trade.status.status_code == "E003"
+    assert native_trade.status.msg == "rejected"
+    sync.close()
+
+
+def test_last_successful_modified_price_survives_a_failed_update(mock_api):
+    native_trade = create_native_trade()
+    native_trade.status.status = Status.Submitted
+    native_trade.status.modified_price = 0.0
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+    new_event = create_stock_order_event()
+
+    first_update = deepcopy(new_event)
+    first_update["operation"]["op_type"] = "UpdatePrice"
+    first_update["status"]["exchange_ts"] += 1
+    first_update["status"]["modified_price"] = 101.0
+    api_callback(OrderState.StockOrder, first_update)
+
+    second_update = deepcopy(new_event)
+    second_update["operation"]["op_type"] = "UpdatePrice"
+    second_update["status"]["exchange_ts"] += 2
+    second_update["status"]["modified_price"] = 102.0
+    api_callback(OrderState.StockOrder, second_update)
+
+    failed_update = deepcopy(new_event)
+    failed_update["operation"].update(
+        {"op_type": "UpdatePrice", "op_code": "E004", "op_msg": "rejected"}
+    )
+    failed_update["status"]["exchange_ts"] += 3
+    failed_update["status"]["modified_price"] = 999.0
+    api_callback(OrderState.StockOrder, failed_update)
+
+    assert native_trade.order.price == 100.0
+    assert native_trade.status.modified_price == 102.0
+    assert native_trade.status.status == Status.Submitted
+    assert native_trade.status.status_code == "E004"
+    sync.close()
+
+
+def test_sparse_success_report_preserves_omitted_status_fields(mock_api):
+    native_trade = create_native_trade()
+    native_trade.status.status = Status.Submitted
+    native_trade.status.web_id = "137"
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    event = create_stock_order_event()
+    event["operation"]["op_type"] = "UpdatePrice"
+    event["status"]["modified_price"] = 101.0
+    event["status"].pop("order_quantity")
+    event["status"].pop("web_id")
+
+    mock_api.set_order_callback.call_args.args[0](OrderState.StockOrder, event)
+
+    assert native_trade.status.modified_price == 101.0
+    assert native_trade.status.order_quantity == 2
+    assert native_trade.status.web_id == "137"
+    sync.close()
+
+
+def test_duplicate_quantity_and_cancel_reports_do_not_double_count(mock_api):
+    native_trade = create_native_trade()
+    native_trade.status.status = Status.Submitted
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+    new_event = create_stock_order_event()
+
+    update_event = deepcopy(new_event)
+    update_event["operation"]["op_type"] = "UpdateQty"
+    update_event["status"]["exchange_ts"] += 1
+    update_event["status"]["order_quantity"] = 1
+    update_event["status"]["cancel_quantity"] = 1
+    api_callback(OrderState.StockOrder, update_event)
+    api_callback(OrderState.StockOrder, update_event)
+
+    cancel_event = deepcopy(new_event)
+    cancel_event["operation"]["op_type"] = "Cancel"
+    cancel_event["status"]["exchange_ts"] += 2
+    cancel_event["status"]["order_quantity"] = 0
+    cancel_event["status"]["cancel_quantity"] = 1
+    api_callback(OrderState.StockOrder, cancel_event)
+    api_callback(OrderState.StockOrder, cancel_event)
+
+    assert native_trade.status.status == Status.Cancelled
+    assert native_trade.status.cancel_quantity == 2
+    sync.close()
+
+
+def test_partial_fill_reduction_and_cancel_account_for_original_quantity(mock_api):
+    native_trade = create_native_trade()
+    native_trade.order.quantity = 4
+    native_trade.status.order_quantity = 4
+    native_trade.status.status = Status.Submitted
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    api_callback = mock_api.set_order_callback.call_args.args[0]
+
+    api_callback(OrderState.StockDeal, create_stock_deal_event(quantity=1))
+
+    update_event = create_stock_order_event()
+    update_event["operation"]["op_type"] = "UpdateQty"
+    update_event["status"]["exchange_ts"] += 1
+    update_event["status"]["order_quantity"] = 2
+    update_event["status"]["cancel_quantity"] = 1
+    api_callback(OrderState.StockOrder, update_event)
+
+    cancel_event = create_stock_order_event()
+    cancel_event["operation"]["op_type"] = "Cancel"
+    cancel_event["status"]["exchange_ts"] += 2
+    cancel_event["status"]["order_quantity"] = 0
+    cancel_event["status"]["cancel_quantity"] = 2
+    api_callback(OrderState.StockOrder, cancel_event)
+
+    assert native_trade.status.status == Status.Cancelled
+    assert native_trade.status.deal_quantity == 1
+    assert native_trade.status.cancel_quantity == 3
+    assert (
+        native_trade.status.deal_quantity + native_trade.status.cancel_quantity
+        == native_trade.order.quantity
+    )
+    sync.close()
 
 
 def test_combo_deal_does_not_project_into_trade(mock_api):
