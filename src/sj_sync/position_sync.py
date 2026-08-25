@@ -278,10 +278,6 @@ class PositionSync:
             ):
                 trade.status.status = Status.Cancelled
 
-            if op_type == "UpdatePrice" and op_code == "00":
-                trade.order.price = (
-                    status_data.get("modified_price") or order_data["price"]
-                )
             for field in ("id", "seqno", "ordno", "custom_field"):
                 if field in order_data:
                     setattr(trade.order, field, order_data[field])
@@ -290,7 +286,7 @@ class PositionSync:
             trade.status.msg = str(operation.get("op_msg", ""))
             if "id" in status_data:
                 trade.status.id = status_data["id"]
-            if exchange_ts:
+            if exchange_ts and (op_code == "00" or op_type == "New"):
                 event_time = datetime.datetime.fromtimestamp(
                     exchange_ts,
                     tz=datetime.timezone(datetime.timedelta(hours=8)),
@@ -298,14 +294,23 @@ class PositionSync:
                 if op_type == "New" and trade.status.order_datetime is None:
                     trade.status.order_datetime = event_time
                 trade.status.modified_time = event_time
-            for field in (
-                "modified_price",
-                "cancel_quantity",
-                "order_quantity",
-                "web_id",
+            if op_code == "00" and op_type in {"UpdateQty", "Cancel"}:
+                trade.status.cancel_quantity += (
+                    status_data.get("cancel_quantity", 0) or 0
+                )
+            if (
+                op_code == "00"
+                and op_type == "UpdatePrice"
+                and "modified_price" in status_data
             ):
-                if field in status_data:
-                    setattr(trade.status, field, status_data[field])
+                trade.status.modified_price = status_data["modified_price"]
+            if op_code == "00":
+                for field in (
+                    "order_quantity",
+                    "web_id",
+                ):
+                    if field in status_data:
+                        setattr(trade.status, field, status_data[field])
         return True
 
     def _order_trade_key(self, data: Dict) -> Tuple[str, str]:
