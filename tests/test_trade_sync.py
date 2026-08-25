@@ -713,6 +713,26 @@ def test_last_successful_modified_price_survives_a_failed_update(mock_api):
     sync.close()
 
 
+def test_sparse_success_report_preserves_omitted_status_fields(mock_api):
+    native_trade = create_native_trade()
+    native_trade.status.status = Status.Submitted
+    native_trade.status.web_id = "137"
+    mock_api.list_trades.return_value = [native_trade]
+    sync = PositionSync(mock_api)
+    event = create_stock_order_event()
+    event["operation"]["op_type"] = "UpdatePrice"
+    event["status"]["modified_price"] = 101.0
+    event["status"].pop("order_quantity")
+    event["status"].pop("web_id")
+
+    mock_api.set_order_callback.call_args.args[0](OrderState.StockOrder, event)
+
+    assert native_trade.status.modified_price == 101.0
+    assert native_trade.status.order_quantity == 2
+    assert native_trade.status.web_id == "137"
+    sync.close()
+
+
 def test_duplicate_quantity_and_cancel_reports_do_not_double_count(mock_api):
     native_trade = create_native_trade()
     native_trade.status.status = Status.Submitted
